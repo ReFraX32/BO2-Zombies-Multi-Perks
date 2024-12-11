@@ -11,6 +11,7 @@
 init()
 {
     // Initialize effects and get machine entities
+    level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
     level._effect["multi_mule_kick"] = loadfx("misc/fx_zombie_cola_arsenal_on");
     level._effect["multi_juggernog"] = loadfx("misc/fx_zombie_cola_jugg_on");
     level._effect["multi_staminup"] = loadfx("misc/fx_zombie_cola_staminup_on");
@@ -444,7 +445,6 @@ process_multi_mule_kick_purchase()
 
     self iprintln("^1Mule Kick Level " + self.multi_mule_kick_counter + 
                   "\n^2Weapon Limit increased to " + self.weapon_limit_counter);
-    
     wait 0.5;
     self.machine_is_in_use = false;
     self.is_purchasing = false;
@@ -504,7 +504,6 @@ process_multi_juggernog_purchase()
     self iprintln("^1Juggernog Level " + self.multi_juggernog_counter + 
                   "\n^2Health increased to " + self.maxhealth + 
                   "\n^8Now you resist " + self.hits_counter + " Hits!");
-    
     wait 0.5;
     self.machine_is_in_use = false;
     self.is_purchasing = false;
@@ -560,7 +559,6 @@ process_speedcola_pointcrusher_purchase()
     
     self iprintln("^1Point Crusher Level " + self.multi_pointcrusher_counter + 
                   "\n^2Points Multiplier increased to x" + self.point_multiplier);
-    
     wait 0.5;
     self.machine_is_in_use = false;
     self.is_purchasing = false;
@@ -1175,7 +1173,6 @@ process_muscle_milk_purchase()
     self iprintln("^2Muscle Milk Acquired!" +
                     "\n^3Now you can electrocute when you use your melee weapon." +
                     "\n^1Cooldown: 15 seconds");
-
     self thread monitor_muscle_milk();
     
     wait 0.5;
