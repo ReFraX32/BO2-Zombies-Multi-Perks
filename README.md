@@ -7,6 +7,7 @@ This mod enhances the classic Call of Duty: Black Ops 2 Zombies experience by in
 - **Scaling Perks**: Vanilla perks (Juggernog, Mule Kick, etc.) have effects and prices that scale as more perks are added.
 - **Increased Replayability**: Encourages unique strategies based on scaling perks and dynamic pricing.
 - **Seamless Integration**: Designed to work naturally with the existing maps and mechanics.
+- **Custom Perks**: Muscle Milk (Electric Melee attacks), Point Crusher (Points multiplier) and Exo Movement (Jetpack).
 
 ### Installation
 1. Download the compiled file from [here](https://github.com/ReFraX32/BO2-Zombies-Multi-Perks/releases/tag/release) and place it in the `Plutonium\storage\t6\scripts\zm` folder.
