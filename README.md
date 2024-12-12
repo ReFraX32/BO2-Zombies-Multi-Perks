@@ -1,5 +1,5 @@
 # Multi-Perk Mod for Call of Duty: Black Ops 2 Zombies
-![Multi-Perks-Preview](https://github.com/user-attachments/assets/73258f56-d0d5-462b-8435-85a94d4b28e3)
+![Multi-Perks-Preview](https://github.com/user-attachments/assets/355a7126-ed1d-4b80-803a-e0760305f050)
 
 ## Overview
 This mod enhances the classic Call of Duty: Black Ops 2 Zombies experience by introducing **Multi-Perk Scaling**, a feature that scales the price and effects of the vanilla perks dynamically. As players stack perks, their effects grow in power, but so does the price, providing a fresh strategic layer to the gameplay and **Custom Perks** with their unique mechanics to let the player create new plans to survive!.
