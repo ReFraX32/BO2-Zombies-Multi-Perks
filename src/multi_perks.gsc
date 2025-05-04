@@ -10,7 +10,6 @@
 
 init()
 {
-    // Initialize effects and get machine entities
     level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
     level._effect["multi_mule_kick"] = loadfx("misc/fx_zombie_cola_arsenal_on");
     level._effect["multi_juggernog"] = loadfx("misc/fx_zombie_cola_jugg_on");
@@ -62,25 +61,21 @@ onPlayerSpawned()
 
 reset_perk_values()
 {
-    // Mule Kick values
     self.hasMuleKickOnce = false;
     self.multi_mule_kick_counter = 1;
     self.starting_mule_kick_price = 4000;
     self.mule_kick_price = self.starting_mule_kick_price;
     self.weapon_limit_counter = 3;
 
-    // Juggernog values
     self.hasJuggernogOnce = false;
     self.multi_juggernog_counter = 1;
     self.starting_jugger_price = 5000;
     self.jugger_price = self.starting_jugger_price;
 
-    // Stamin-Up Jetpack values
     self.hasJetpackOnce = false;
     self.jetpack_price = 4000;
     self.has_jetpack = false;
 
-    // Speed Cola Point Crusher values
     self.hasPointCrusherOnce = false;
     self.multi_pointcrusher_counter = 0;
     self.starting_pointcrusher_price = 4000;
@@ -91,7 +86,6 @@ reset_perk_values()
     self.last_speedcola_purchase_time = 0;
     self.has_pointcrusher = false;
 
-    // Muscle Milk values
     self.has_muscle_milk = false;
     self.muscle_milk_price = 3000;
     self.muscle_milk_cooldown = false;
@@ -99,7 +93,6 @@ reset_perk_values()
     self.current_quickrevive_trigger = undefined;
     self.last_quickrevive_purchase_time = 0;
 
-    // Shared values
     self.machine_is_in_use = false;
     self.can_buy_multi_mule = false;
     self.can_buy_multi_jugger = false;
@@ -109,19 +102,16 @@ reset_perk_values()
     self.perk_count = 0;
     self.perks_given = 0;
     
-    // Machine locations
     self.original_mule_kick_machine_location = undefined;
     self.original_jugger_machine_location = undefined;
     self.original_staminup_machine_location = undefined;
     self.original_speedcola_machine_location = undefined;
     
-    // Triggers
     self.current_mule_kick_trigger = undefined;
     self.current_jugger_trigger = undefined;
     self.current_staminup_trigger = undefined;
     self.current_speedcola_trigger = undefined;
     
-    // Purchase timers
     self.last_mule_kick_purchase_time = 0;
     self.last_jugger_purchase_time = 0;
     self.last_staminup_purchase_time = 0;
@@ -550,7 +540,6 @@ process_speedcola_pointcrusher_purchase()
     self allowProne(true);
     self allowSprint(true);
     
-    // Update point multiplier
     self.multi_pointcrusher_counter++;
     self.point_multiplier = self.multi_pointcrusher_counter + 1;
     self.pointcrusher_price = self.starting_pointcrusher_price * self.point_multiplier;
@@ -887,7 +876,6 @@ init_jetpack()
     self endon("disconnect");
     level endon("end_game");
     
-    // Initialize with improved values for smoother movement
     self.sprint_boost = 0;
     self.jump_boost = 0;
     self.slam_boost = 0;
@@ -912,7 +900,6 @@ handle_jetpack_movement()
         {
             if(!self isonground())
             {
-                // Reset boost counters
                 if(self sprintbuttonpressed() || self jumpbuttonpressed())
                 {
                     wait_network_frame();
@@ -925,7 +912,6 @@ handle_jetpack_movement()
                 
                 while(!self isonground())
                 {
-                    // Jump Boost
                     if(self.exo_boost >= 20 && self.jump_boost < 1 && self jumpbuttonpressed())
                     {
                         self.is_flying_jetpack = 1;
@@ -942,7 +928,6 @@ handle_jetpack_movement()
                         self thread monitor_exo_boost();
                     }
                     
-                    // Sprint Boost
                     if(self.exo_boost >= 20 && self.sprint_boost < 1 && self sprintbuttonpressed())
                     {
                         self.is_flying_jetpack = 1;
@@ -966,7 +951,6 @@ handle_jetpack_movement()
                         self thread monitor_exo_boost();
                     }
                     
-                    // Hover (ADS)
                     if(self adsbuttonpressed() && self.exo_boost > 0)
                     {
                         current_vel = self getvelocity();
@@ -978,7 +962,6 @@ handle_jetpack_movement()
                         }
                     }
                     
-                    // Slam Attack
                     if(self.exo_boost >= 30 && self.slam_boost < 1 && self.jump_boost > 0 && self stancebuttonpressed())
                     {
                         self.slam_boost++;
@@ -991,7 +974,6 @@ handle_jetpack_movement()
                     wait_network_frame();
                 }
                 
-                // Ground Slam Effect
                 if(self.slam_boost > 0)
                 {
                     self enableinvulnerability();
@@ -1217,11 +1199,9 @@ muscle_milk_attack()
 {
     self.muscle_milk_cooldown = true;
     
-    // Electric effect and damage
     playfxontag(level._effect["poltergeist"], self, "J_SpineUpper");
     self playsound("zmb_turbine_explo");
     
-    // Damage nearby zombies
     zombies = getAiArray(level.zombie_team);
     foreach(zombie in zombies)
     {
@@ -1231,7 +1211,6 @@ muscle_milk_attack()
         }
     }
     
-    // Notify player when ability is ready again
     self thread muscle_milk_cooldown_timer();
 }
 
