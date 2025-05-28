@@ -15,5 +15,7 @@ This mod enhances the classic Call of Duty: Black Ops 2 Zombies experience by in
 - **Punch-a-Cola**: Scaling damage multiplier, Pack-a-Punch yourself!
 
 ### Installation
-1. Download the compiled file from [here](https://github.com/ReFraX32/BO2-Zombies-Multi-Perks/releases/tag/release) and place it in the `Plutonium\storage\t6\scripts\zm` folder.
+1. Download the compiled file from [here](https://github.com/ReFraX32/BO2-Zombies-Multi-Perks/releases)
+2. Press Windows + R then type %localappdata% and press Enter.
+3. Place the mod in the `Plutonium\storage\t6\scripts\zm` folder.
 2. Start a Zombies game and enjoy the enhanced perks system and custom perks!
