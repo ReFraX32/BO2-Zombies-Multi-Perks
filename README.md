@@ -17,13 +17,3 @@ This mod enhances the classic Call of Duty: Black Ops 2 Zombies experience by in
 ### Installation
 1. Download the compiled file from [here](https://github.com/ReFraX32/BO2-Zombies-Multi-Perks/releases/tag/release) and place it in the `Plutonium\storage\t6\scripts\zm` folder.
 2. Start a Zombies game and enjoy the enhanced perks system and custom perks!
-
-### Compatibility
-- Works on all **Black Ops 2 Zombies vanilla maps**
-- Requires testing with other mods to ensure compatibility.
-
-### Notes
-- Feedback and bug reports are welcome.
-
-### Credits
-- **Special Thanks**: To the [Custom Perks Mod](https://github.com/Viren070/BO2-Zombies-Custom-Perks/tree/main) for inspiration.
