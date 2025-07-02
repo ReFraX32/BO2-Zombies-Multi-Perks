@@ -9,3 +9,4 @@
 - [ ] Fix health compatibility with the custom perk "Bloodthirst" from the custom perk machines mod.
 - [x] Fix Muscle Milk not giving money.
 - [ ] Fix Perk Deny sound spam.
+- [ ] Fix Muscle Milk not working in Origins.
