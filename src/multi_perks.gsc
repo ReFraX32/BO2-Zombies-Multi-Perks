@@ -478,7 +478,14 @@ perk_bought_check()
         
         if(self hasPerk("specialty_quickrevive") && !isDefined(self.original_quickrevive_machine_location))
         {
-            self.original_quickrevive_machine_location = level.multi_quickrevive_machine.origin;
+            if (getdvar("mapname") == "zm_tomb") 
+            {
+               self.original_quickrevive_machine_location = (2355.26, 5033.44, -303.875);
+            }
+            else
+            {
+               self.original_quickrevive_machine_location = level.multi_quickrevive_machine.origin;
+            }
             self.last_quickrevive_purchase_time = GetTime();
             self.can_buy_muscle_milk = false; wait 1; self.can_buy_muscle_milk = true;
         }
