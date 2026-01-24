@@ -13,6 +13,7 @@ This mod enhances the classic Call of Duty: Black Ops 2 Zombies experience by in
 - **Point Crusher**: Scaling Points multiplier
 - **Exo Suit**: Jetpack and Slam Attack.
 - **Punch-a-Cola**: Scaling damage multiplier, Pack-a-Punch yourself!
+- **Double Tap Machine in Origins**: A custom Double Tap machine located near Generator 2 that allows players to use Punch-a-Cola.
 
 ### Installation
 1. Download the compiled file from [here](https://github.com/ReFraX32/BO2-Zombies-Multi-Perks/releases)

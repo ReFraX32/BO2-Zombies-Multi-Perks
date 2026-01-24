@@ -24,7 +24,31 @@ init()
     level._game_module_point_adjustment = ::point_crusher_multiplier;
     level thread register_zombie_damage_callback( ::custom_zombie_damage_multiplier );
     
+    if (getdvar("mapname") == "zm_tomb")
+    {
+        level.tomb_doubletap_origin = (-580, 3620, -295);
+        level thread spawn_custom_doubletap_machine();
+    }
+
     level thread onPlayerConnect();
+}
+
+spawn_custom_doubletap_machine()  
+{  
+    if(!isDefined(level.tomb_doubletap_origin)) return;
+    
+    position = level.tomb_doubletap_origin;
+    angles = (0, 90, 0);
+      
+    machine = spawn("script_model", position);
+    machine setmodel("zombie_vending_marathon_on");
+    machine.angles = angles;
+    
+    collision = spawn("script_model", position, 1);
+    collision.angles = angles;
+    collision setmodel("zm_collision_perks1");
+    collision.script_noteworthy = "clip";
+    collision disconnectpaths();
 }
 
 create_trigger_radius(hint_text, origin)
@@ -147,6 +171,8 @@ check_proximity_to_machines()
 
         if(self hasPerk("specialty_rof") && !self.is_purchasing)
             self check_perk_proximity("doubletap", self.original_doubletap_machine_location, self.last_doubletap_purchase_time);
+        else if(getdvar("mapname") == "zm_tomb" && !self hasPerk("specialty_rof") && !self.is_purchasing)
+            self check_perk_proximity("doubletap_buy", level.tomb_doubletap_origin, 0);
         
         wait 0.2;
     }
@@ -173,6 +199,8 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
                 self thread show_muscle_milk_prompt();
             else if(perk_type == "doubletap")
                 self thread show_punchcola_prompt();
+            else if(perk_type == "doubletap_buy")
+                self thread show_doubletap_buy_prompt();
         }
     }
     else
@@ -207,12 +235,45 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
             self.current_doubletap_trigger delete();
             self.current_doubletap_trigger = undefined;
         }
+        else if(perk_type == "doubletap_buy" && isDefined(self.buy_doubletap_trigger))
+        {
+            self.buy_doubletap_trigger delete();
+            self.buy_doubletap_trigger = undefined;
+        }
     }
 }
 
 show_perk_prompt_core(trigger_var, perk_name, price, machine_location, purchase_func, extra_condition)
 {
     while(self isTouching(trigger_var) && self hasPerk(perk_name) && !self.machine_is_in_use && !self.is_purchasing && !extra_condition)
+    {
+        if(self useButtonPressed() && self.score >= price && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+        {
+            if(isDefined(trigger_var))
+            {
+                trigger_var delete();
+                trigger_var = undefined;
+            }
+            if(distance(self.origin, machine_location) <= 70)
+                self thread [[purchase_func]]();
+            break;
+        }
+        else if(self useButtonPressed() && self.score < price)
+        {
+            if(distance(self.origin, machine_location) <= 70)
+            {
+                self playsound("evt_perk_deny");
+                self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
+                wait 1;
+            }
+        }
+        wait 0.1;
+    }
+}
+
+show_buy_prompt_core(trigger_var, perk_name, price, machine_location, purchase_func)
+{
+    while(self isTouching(trigger_var) && !self hasPerk(perk_name) && !self.machine_is_in_use && !self.is_purchasing)
     {
         if(self useButtonPressed() && self.score >= price && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
         {
@@ -334,9 +395,49 @@ show_punchcola_prompt()
     }
 }
 
-process_perk_purchase(perk_name, price, machine_location, bottle_name, additional_condition)
+show_doubletap_buy_prompt()
 {
-    if(!self hasPerk(perk_name) || self.is_purchasing)
+    self endon("disconnect");
+    self endon("death");
+    if(self hasPerk("specialty_rof") || self.is_purchasing)
+        return;
+    
+    if(isDefined(self.buy_doubletap_trigger))
+        return;
+
+    if(!isDefined(level.tomb_doubletap_origin)) return;
+
+    self.buy_doubletap_trigger = spawn("trigger_radius", level.tomb_doubletap_origin, 1, 100, 128);
+    self.buy_doubletap_trigger setcursorhint("HINT_ACTIVATE");
+    self.buy_doubletap_trigger sethintstring("Hold ^3[{+activate}]^7 for Double Tap [Cost: 2000]");
+    self.buy_doubletap_trigger setvisibletoall();
+        
+    self show_buy_prompt_core(self.buy_doubletap_trigger, "specialty_rof", 2000, level.tomb_doubletap_origin, ::process_doubletap_buy);
+    
+    if(isDefined(self.buy_doubletap_trigger))
+    {
+        self.buy_doubletap_trigger delete();
+        self.buy_doubletap_trigger = undefined;
+    }
+}
+
+process_doubletap_buy()
+{
+    self process_perk_purchase("specialty_rof", 2000, level.tomb_doubletap_origin, "zombie_perk_bottle_doubletap", undefined, true);
+    self maps\mp\zombies\_zm_perks::give_perk( "specialty_rof" );
+    self.last_doubletap_purchase_time = GetTime();
+    self notify("perk_acquired");
+}
+
+process_perk_purchase(perk_name, price, machine_location, bottle_name, additional_condition, allow_new_purchase)
+{
+    if(self.is_purchasing)
+        return;
+
+    if(!isDefined(allow_new_purchase))
+        allow_new_purchase = false;
+
+    if(!allow_new_purchase && !(self hasPerk(perk_name)))
         return;
     
     if(isDefined(additional_condition) && additional_condition)
@@ -492,7 +593,11 @@ perk_bought_check()
 
         if(self hasPerk("specialty_rof") && !isDefined(self.original_doubletap_machine_location))
         {
-            self.original_doubletap_machine_location = level.multi_doubletap_machine.origin;
+            if (getdvar("mapname") == "zm_tomb")
+               self.original_doubletap_machine_location = level.tomb_doubletap_origin;
+            else
+               self.original_doubletap_machine_location = level.multi_doubletap_machine.origin;
+
             self.last_doubletap_purchase_time = GetTime();
             if(!isDefined(self.punchcola_damage_level)) self.punchcola_damage_level = 1;
             self.can_buy_punchcola = false; wait 1; self.can_buy_punchcola = true;
