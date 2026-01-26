@@ -23,6 +23,8 @@ init()
     level.get_player_weapon_limit = ::custom_get_player_weapon_limit;
     level._game_module_point_adjustment = ::point_crusher_multiplier;
     level thread register_zombie_damage_callback( ::custom_zombie_damage_multiplier );
+
+    level.perk_purchase_limit = 99;
     
     if (getdvar("mapname") == "zm_tomb")
     {
