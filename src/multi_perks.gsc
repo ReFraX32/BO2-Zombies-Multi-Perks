@@ -8,6 +8,7 @@
 #include maps\mp\zombies\_zm_score;
 #include maps\mp\zombies\_zm_laststand;
 #include maps\mp\zombies\_zm_spawner;
+#include maps\mp\zombies\_zm_afterlife;
 
 init()
 {
@@ -623,59 +624,62 @@ monitor_perk_status()
     
     while(true)
     {
-        if(!self hasPerk("specialty_additionalprimaryweapon"))
+        if (!isdefined(level.zombiemode_using_afterlife) || !level.zombiemode_using_afterlife || !is_true(self.afterlife))
         {
-            self.multi_mule_kick_counter = 1;
-            self.mule_kick_price = self.starting_mule_kick_price;
-            self.original_mule_kick_machine_location = undefined;
-            self.last_mule_kick_purchase_time = 0;
-            self.weapon_limit_counter = 3;
-            if(isDefined(self.current_mule_kick_trigger)) { self.current_mule_kick_trigger delete(); self.current_mule_kick_trigger = undefined; }
-        }
-        
-        if(!self hasPerk("specialty_armorvest"))
-        {
-            self.multi_juggernog_counter = 1;
-            self.jugger_price = self.starting_jugger_price;
-            self.original_jugger_machine_location = undefined;
-            self.last_jugger_purchase_time = 0;
-            if(isDefined(self.current_jugger_trigger)) { self.current_jugger_trigger delete(); self.current_jugger_trigger = undefined; }
-        }
-        
-        if(!self hasPerk("specialty_longersprint"))
-        {
-            self.has_jetpack = false;
-            self.original_staminup_machine_location = undefined;
-            self.last_staminup_purchase_time = 0;
-            if(isDefined(self.current_staminup_trigger)) { self.current_staminup_trigger delete(); self.current_staminup_trigger = undefined; }
-        }
-        
-        if(!self hasPerk("specialty_fastreload"))
-        {
-            self.multi_pointcrusher_counter = 0;
-            self.pointcrusher_price = self.starting_pointcrusher_price;
-            self.point_multiplier = 1;
-            self.original_speedcola_machine_location = undefined;
-            self.last_speedcola_purchase_time = 0;
-            if(isDefined(self.current_speedcola_trigger)) { self.current_speedcola_trigger delete(); self.current_speedcola_trigger = undefined; }
-        }
-        
-        if(!self hasPerk("specialty_quickrevive"))
-        {
-            self.has_muscle_milk = false;
-            self.original_quickrevive_machine_location = undefined;
-            self.last_quickrevive_purchase_time = 0;
-            if(isDefined(self.current_quickrevive_trigger)) { self.current_quickrevive_trigger delete(); self.current_quickrevive_trigger = undefined; }
-        }
+            if(!self hasPerk("specialty_additionalprimaryweapon"))
+            {
+                self.multi_mule_kick_counter = 1;
+                self.mule_kick_price = self.starting_mule_kick_price;
+                self.original_mule_kick_machine_location = undefined;
+                self.last_mule_kick_purchase_time = 0;
+                self.weapon_limit_counter = 3;
+                if(isDefined(self.current_mule_kick_trigger)) { self.current_mule_kick_trigger delete(); self.current_mule_kick_trigger = undefined; }
+            }
+            
+            if(!self hasPerk("specialty_armorvest"))
+            {
+                self.multi_juggernog_counter = 1;
+                self.jugger_price = self.starting_jugger_price;
+                self.original_jugger_machine_location = undefined;
+                self.last_jugger_purchase_time = 0;
+                if(isDefined(self.current_jugger_trigger)) { self.current_jugger_trigger delete(); self.current_jugger_trigger = undefined; }
+            }
+            
+            if(!self hasPerk("specialty_longersprint"))
+            {
+                self.has_jetpack = false;
+                self.original_staminup_machine_location = undefined;
+                self.last_staminup_purchase_time = 0;
+                if(isDefined(self.current_staminup_trigger)) { self.current_staminup_trigger delete(); self.current_staminup_trigger = undefined; }
+            }
+            
+            if(!self hasPerk("specialty_fastreload"))
+            {
+                self.multi_pointcrusher_counter = 0;
+                self.pointcrusher_price = self.starting_pointcrusher_price;
+                self.point_multiplier = 1;
+                self.original_speedcola_machine_location = undefined;
+                self.last_speedcola_purchase_time = 0;
+                if(isDefined(self.current_speedcola_trigger)) { self.current_speedcola_trigger delete(); self.current_speedcola_trigger = undefined; }
+            }
+            
+            if(!self hasPerk("specialty_quickrevive"))
+            {
+                self.has_muscle_milk = false;
+                self.original_quickrevive_machine_location = undefined;
+                self.last_quickrevive_purchase_time = 0;
+                if(isDefined(self.current_quickrevive_trigger)) { self.current_quickrevive_trigger delete(); self.current_quickrevive_trigger = undefined; }
+            }
 
-        if(!self hasPerk("specialty_rof"))
-        {
-            self.multi_punchcola_counter = 1;
-            self.punchcola_price = self.starting_punchcola_price;
-            self.punchcola_damage_level = 1;
-            self.original_doubletap_machine_location = undefined;
-            self.last_doubletap_purchase_time = 0;
-            if(isDefined(self.current_doubletap_trigger)) { self.current_doubletap_trigger delete(); self.current_doubletap_trigger = undefined; }
+            if(!self hasPerk("specialty_rof"))
+            {
+                self.multi_punchcola_counter = 1;
+                self.punchcola_price = self.starting_punchcola_price;
+                self.punchcola_damage_level = 1;
+                self.original_doubletap_machine_location = undefined;
+                self.last_doubletap_purchase_time = 0;
+                if(isDefined(self.current_doubletap_trigger)) { self.current_doubletap_trigger delete(); self.current_doubletap_trigger = undefined; }
+            }
         }
         
         wait 0.5;
