@@ -14,6 +14,7 @@ This mod enhances the classic Call of Duty: Black Ops 2 Zombies experience by in
 - **Exo Suit**: Jetpack and Slam Attack.
 - **Punch-a-Cola**: Scaling damage multiplier, Pack-a-Punch yourself!
 - **Double Tap Machine in Origins**: A custom Double Tap machine located near Generator 2 that allows players to use Punch-a-Cola.
+- **Stamin-Up Machine in Mob of the Dead**: A custom Stamin-Up machine located the Spiral Staircase that allows players to use the Exo Suit.
 
 ### Installation
 1. Download the compiled file from [here](https://github.com/ReFraX32/BO2-Zombies-Multi-Perks/releases)

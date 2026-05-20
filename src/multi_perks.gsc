@@ -33,6 +33,17 @@ init()
         level thread spawn_custom_doubletap_machine();
     }
 
+    if (getdvar("mapname") == "zm_prison")
+    {
+        level.prison_staminup_origin = (197, 8462, 779);
+        level thread spawn_custom_staminup_machine();
+        level.staminup_bottle = "zombie_perk_bottle_doubletap";
+    }
+    else
+    {
+        level.staminup_bottle = "zombie_perk_bottle_marathon";
+    }
+
     level thread onPlayerConnect();
 }
 
@@ -45,6 +56,24 @@ spawn_custom_doubletap_machine()
       
     machine = spawn("script_model", position);
     machine setmodel("zombie_vending_marathon_on");
+    machine.angles = angles;
+    
+    collision = spawn("script_model", position, 1);
+    collision.angles = angles;
+    collision setmodel("zm_collision_perks1");
+    collision.script_noteworthy = "clip";
+    collision disconnectpaths();
+}
+
+spawn_custom_staminup_machine()
+{  
+    if(!isDefined(level.prison_staminup_origin)) return;
+    
+    position = level.prison_staminup_origin;
+    angles = (0, 180, 0);
+      
+    machine = spawn("script_model", position);
+    machine setmodel("p6_zm_al_vending_doubletap2_on");
     machine.angles = angles;
     
     collision = spawn("script_model", position, 1);
@@ -165,6 +194,8 @@ check_proximity_to_machines()
         
         if(self hasPerk("specialty_longersprint") && !self.is_purchasing)
             self check_perk_proximity("staminup", self.original_staminup_machine_location, self.last_staminup_purchase_time, self.has_jetpack);
+        else if(getdvar("mapname") == "zm_prison" && !self hasPerk("specialty_longersprint") && !self.is_purchasing)
+            self check_perk_proximity("staminup_buy", level.prison_staminup_origin, 0);
         
         if(self hasPerk("specialty_fastreload") && !self.is_purchasing)
             self check_perk_proximity("speedcola", self.original_speedcola_machine_location, self.last_speedcola_purchase_time);
@@ -196,6 +227,8 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
                 self thread show_multi_juggernog_prompt();
             else if(perk_type == "staminup")
                 self thread show_staminup_jetpack_prompt();
+            else if(perk_type == "staminup_buy")
+                self thread show_staminup_buy_prompt();
             else if(perk_type == "speedcola")
                 self thread show_speedcola_pointcrusher_prompt();
             else if(perk_type == "quickrevive")
@@ -222,6 +255,11 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
         {
             self.current_staminup_trigger delete();
             self.current_staminup_trigger = undefined;
+        }
+        else if(perk_type == "staminup_buy" && isDefined(self.buy_staminup_trigger))
+        {
+            self.buy_staminup_trigger delete();
+            self.buy_staminup_trigger = undefined;
         }
         else if(perk_type == "speedcola" && isDefined(self.current_speedcola_trigger))
         {
@@ -424,12 +462,47 @@ show_doubletap_buy_prompt()
     }
 }
 
+show_staminup_buy_prompt()
+{
+    self endon("disconnect");
+    self endon("death");
+    if(self hasPerk("specialty_longersprint") || self.is_purchasing)
+        return;
+    
+    if(isDefined(self.buy_staminup_trigger))
+        return;
+
+    if(!isDefined(level.prison_staminup_origin)) return;
+
+    self.buy_staminup_trigger = spawn("trigger_radius", level.prison_staminup_origin, 1, 100, 128);
+    self.buy_staminup_trigger setcursorhint("HINT_ACTIVATE");
+    self.buy_staminup_trigger sethintstring("Hold ^3[{+activate}]^7 for Stamin-Up [Cost: 2000]");
+    self.buy_staminup_trigger setvisibletoall();
+        
+    self show_buy_prompt_core(self.buy_staminup_trigger, "specialty_longersprint", 2000, level.prison_staminup_origin, ::process_staminup_buy);
+    
+    if(isDefined(self.buy_staminup_trigger))
+    {
+        self.buy_staminup_trigger delete();
+        self.buy_staminup_trigger = undefined;
+    }
+}
+
 process_doubletap_buy()
 {
     self process_perk_purchase("specialty_rof", 2000, level.tomb_doubletap_origin, "zombie_perk_bottle_doubletap", undefined, true);
     self maps\mp\zombies\_zm_perks::give_perk( "specialty_rof" );
     self.last_doubletap_purchase_time = GetTime();
     self notify("perk_acquired");
+}
+
+process_staminup_buy()
+{
+    self process_perk_purchase("specialty_longersprint", 2000, level.prison_staminup_origin, level.staminup_bottle, undefined, true);
+    self maps\mp\zombies\_zm_perks::give_perk( "specialty_longersprint" );
+    self.last_staminup_purchase_time = GetTime();
+    self notify("perk_acquired");
+    self iprintln("^2Stamin-Up Acquired!\n^1If you do not see the icon, it's because Mob of the Dead does not have one for it.");
 }
 
 process_perk_purchase(perk_name, price, machine_location, bottle_name, additional_condition, allow_new_purchase)
@@ -515,7 +588,7 @@ process_speedcola_pointcrusher_purchase()
 
 process_staminup_jetpack_purchase()
 {
-    self process_perk_purchase("specialty_longersprint", self.jetpack_price, self.original_staminup_machine_location, "zombie_perk_bottle_marathon", self.has_jetpack);
+    self process_perk_purchase("specialty_longersprint", self.jetpack_price, self.original_staminup_machine_location, level.staminup_bottle, self.has_jetpack);
     self.has_jetpack = true;
     self.last_staminup_purchase_time = GetTime();
     self iprintln("^2Exo Suit Acquired!\n^3Now you can Boost yourself!\n^1If you Double Jump and Crouch you can cause an explosion!");
@@ -568,7 +641,11 @@ perk_bought_check()
         
         if(self hasPerk("specialty_longersprint") && !isDefined(self.original_staminup_machine_location))
         {
-            self.original_staminup_machine_location = level.multi_staminup_machine.origin;
+            if (getdvar("mapname") == "zm_prison")
+               self.original_staminup_machine_location = level.prison_staminup_origin;
+            else
+               self.original_staminup_machine_location = level.multi_staminup_machine.origin;
+
             self.last_staminup_purchase_time = GetTime();
             self.can_buy_jetpack = false; wait 1; self.can_buy_jetpack = true;
         }
