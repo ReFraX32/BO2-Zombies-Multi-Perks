@@ -9,15 +9,17 @@ This mod enhances the classic Call of Duty: Black Ops 2 Zombies experience by in
 - **Increased Replayability**: Encourages unique strategies based on scaling perks and dynamic pricing.
 - **Seamless Integration**: Designed to work naturally with the existing maps and mechanics.
 ## **Custom Perks**:
-- **Muscle Milk**: Electric Melee attacks 
-- **Point Crusher**: Scaling Points multiplier
-- **Exo Suit**: Jetpack and Slam Attack.
+- **Muscle Milk**: Electric Melee attacks.
+- **Point Crusher**: Scaling Points multiplier.
+- **Exo Suit**: Double Jump, Jetpack Boost, Slam Attack and Hover.
 - **Punch-a-Cola**: Scaling damage multiplier, Pack-a-Punch yourself!
+- **Vulture Aid**: Killed zombies drop ammo packs, bonus points, or a green stink cloud that makes zombies ignore you while standing inside.
+- **Winter's Wail**: Taking damage from zombies while wounded unleashes a frost blast that freezes nearby zombies solid before thawing them slow. Holds up to 3 charges that recharge over time and refill each round.
 - **Double Tap Machine in Origins**: A custom Double Tap machine located near Generator 2 that allows players to use Punch-a-Cola.
-- **Stamin-Up Machine in Mob of the Dead**: A custom Stamin-Up machine located the Spiral Staircase that allows players to use the Exo Suit.
+- **Stamin-Up Machine in Mob of the Dead**: A custom Stamin-Up machine located at the Spiral Staircase that allows players to use the Exo Suit.
 
 ### Installation
 1. Download the compiled file from [here](https://github.com/ReFraX32/BO2-Zombies-Multi-Perks/releases)
 2. Press Windows + R then type %localappdata% and press Enter.
 3. Place the mod in the `Plutonium\storage\t6\scripts\zm` folder.
-2. Start a Zombies game and enjoy the enhanced perks system and custom perks!
+4. Start a Zombies game and enjoy the enhanced perks system and custom perks!
