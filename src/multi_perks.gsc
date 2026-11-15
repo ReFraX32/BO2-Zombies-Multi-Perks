@@ -24,10 +24,40 @@ init()
     level.multi_quickrevive_machine = getEnt("vending_revive", "targetname");
     level.multi_doubletap_machine = getEnt("vending_doubletap", "targetname");
     
+    if(isDefined(level.multi_mule_kick_machine))
+        level.multi_mule_kick_origin = level.multi_mule_kick_machine.origin;
+    if(isDefined(level.multi_juggernog_machine))
+        level.multi_juggernog_origin = level.multi_juggernog_machine.origin;
+    if(isDefined(level.multi_staminup_machine))
+        level.multi_staminup_origin = level.multi_staminup_machine.origin;
+    if(isDefined(level.multi_speedcola_machine))
+        level.multi_speedcola_origin = level.multi_speedcola_machine.origin;
+    if(isDefined(level.multi_quickrevive_machine))
+        level.multi_quickrevive_origin = level.multi_quickrevive_machine.origin;
+    if(isDefined(level.multi_doubletap_machine))
+        level.multi_doubletap_origin = level.multi_doubletap_machine.origin;
+    
+    dvar_val = getDvarFloat("perk_weapRateMultiplier");
+    if(dvar_val <= 0.0)
+        level.default_weap_rate_mult = 1.0;
+    else
+        level.default_weap_rate_mult = dvar_val;
+
+    dvar_reload = getDvarFloat("perk_weapReloadMultiplier");
+    if(dvar_reload <= 0.0)
+        level.default_weap_reload_mult = 0.5;
+    else
+        level.default_weap_reload_mult = dvar_reload;
+    
     level.get_player_weapon_limit = ::custom_get_player_weapon_limit;
     level._game_module_point_adjustment = ::point_crusher_multiplier;
     level thread register_zombie_damage_callback( ::custom_zombie_damage_multiplier );
     level thread register_zombie_death_event_callback( ::vulture_zombie_death );
+    if(!isDefined(level.player_damage_callbacks))
+        level.player_damage_callbacks = [];
+    if(level.player_damage_callbacks.size == 0)
+        level.player_damage_callbacks[0] = ::multi_perks_player_damage_wrapper;
+    level thread enforce_mod_compatibility();
 
     level.vulture_stink_clouds = [];
 
@@ -126,6 +156,8 @@ onPlayerSpawned()
         self reset_perk_values();
         self thread check_proximity_to_machines();
         self thread perk_bought_check();
+        self thread monitor_staminup_speed();
+        self thread monitor_juggernog_health();
     }
 }
 
@@ -162,6 +194,12 @@ reset_perk_values()
     self.last_staminup_purchase_time = 0;
     self.can_buy_jetpack = false;
 
+    self.multi_staminup_counter = 0;
+    self.starting_staminup_price = 2000;
+    self.staminup_price = self.starting_staminup_price;
+    self.can_buy_staminup = false;
+    self setmovespeedscale(1.0);
+
     self.hasPointCrusherOnce = false;
     self.multi_pointcrusher_counter = 0;
     self.starting_pointcrusher_price = 4000;
@@ -171,6 +209,16 @@ reset_perk_values()
     self.current_speedcola_trigger = undefined;
     self.last_speedcola_purchase_time = 0;
     self.can_buy_pointcrusher = false;
+
+    self.multi_speedcola_counter = 0;
+    self.starting_speedcola_price = 3000;
+    self.speedcola_price = self.starting_speedcola_price;
+    self.can_buy_speedcola = false;
+    if(isDefined(level.default_weap_reload_mult))
+    {
+        self setclientdvar("perk_weapReloadMultiplier", "" + level.default_weap_reload_mult);
+        setdvar("perk_weapReloadMultiplier", level.default_weap_reload_mult);
+    }
 
     self.has_muscle_milk = false;
     self.muscle_milk_price = 3000;
@@ -198,7 +246,27 @@ reset_perk_values()
     self.winters_wail_price = 4000;
     self.winters_wail_charges = 0;
     self.winters_wail_lock = false;
+    self.winters_wail_invulnerable = false;
     self.can_buy_winters_wail = false;
+
+    self.has_doubletap_1 = false;
+    self.doubletap_1_counter = 1;
+    self.starting_doubletap_1_price = 2000;
+    self.doubletap_1_price = self.starting_doubletap_1_price;
+    self.doubletap_1_level = 0;
+    self.can_buy_doubletap_1 = false;
+    if(isDefined(level.default_weap_rate_mult))
+    {
+        self setclientdvar("perk_weapRateMultiplier", "" + level.default_weap_rate_mult);
+        setdvar("perk_weapRateMultiplier", level.default_weap_rate_mult);
+    }
+
+    self.had_mule_kick = false;
+    self.had_juggernog = false;
+    self.had_staminup = false;
+    self.had_speedcola = false;
+    self.had_quickrevive = false;
+    self.had_doubletap = false;
 
     self.machine_is_in_use = false;
     self.is_purchasing = false;
@@ -206,6 +274,238 @@ reset_perk_values()
     self.perk_reminder = 0;
     self.perk_count = 0;
     self.perks_given = 0;
+}
+
+is_perk_paused(perk)
+{
+    if(isDefined(self.disabled_perks) && isDefined(self.disabled_perks[perk]) && self.disabled_perks[perk])
+        return true;
+    return false;
+}
+
+is_perk_machine_powered(perk_name)
+{
+    vending_triggers = getentarray("zombie_vending", "targetname");
+    for(i = 0; i < vending_triggers.size; i++)
+    {
+        trig = vending_triggers[i];
+        if(isDefined(trig.script_noteworthy) && trig.script_noteworthy == perk_name)
+        {
+            if(isDefined(trig.power_on))
+                return (trig.power_on == 1);
+        }
+    }
+    return true;
+}
+
+get_perk_name_for_type(perk_type)
+{
+    switch(perk_type)
+    {
+        case "mule_kick":
+            return "specialty_additionalprimaryweapon";
+        case "jugger":
+            return "specialty_armorvest";
+        case "staminup":
+            return "specialty_longersprint";
+        case "speedcola":
+            return "specialty_fastreload";
+        case "quickrevive":
+            return "specialty_quickrevive";
+        case "doubletap":
+            return "specialty_rof";
+    }
+    return undefined;
+}
+
+cleanup_perk_trigger(perk_type)
+{
+    if(perk_type == "mule_kick" && isDefined(self.current_mule_kick_trigger))
+    {
+        self.current_mule_kick_trigger delete();
+        self.current_mule_kick_trigger = undefined;
+    }
+    else if(perk_type == "jugger" && isDefined(self.current_jugger_trigger))
+    {
+        self.current_jugger_trigger delete();
+        self.current_jugger_trigger = undefined;
+    }
+    else if(perk_type == "staminup" && isDefined(self.current_staminup_trigger))
+    {
+        self.current_staminup_trigger delete();
+        self.current_staminup_trigger = undefined;
+    }
+    else if(perk_type == "staminup_buy" && isDefined(self.buy_staminup_trigger))
+    {
+        self.buy_staminup_trigger delete();
+        self.buy_staminup_trigger = undefined;
+    }
+    else if(perk_type == "speedcola" && isDefined(self.current_speedcola_trigger))
+    {
+        self.current_speedcola_trigger delete();
+        self.current_speedcola_trigger = undefined;
+    }
+    else if(perk_type == "quickrevive" && isDefined(self.current_quickrevive_trigger))
+    {
+        self.current_quickrevive_trigger delete();
+        self.current_quickrevive_trigger = undefined;
+    }
+    else if(perk_type == "doubletap" && isDefined(self.current_doubletap_trigger))
+    {
+        self.current_doubletap_trigger delete();
+        self.current_doubletap_trigger = undefined;
+    }
+    else if(perk_type == "doubletap_buy" && isDefined(self.buy_doubletap_trigger))
+    {
+        self.buy_doubletap_trigger delete();
+        self.buy_doubletap_trigger = undefined;
+    }
+}
+
+get_perk_machine_location(perk_type)
+{
+    targetname = undefined;
+    script_noteworthy = undefined;
+    
+    switch(perk_type)
+    {
+        case "mule_kick":
+            targetname = "vending_additionalprimaryweapon";
+            script_noteworthy = "specialty_additionalprimaryweapon";
+            break;
+        case "jugger":
+            targetname = "vending_jugg";
+            script_noteworthy = "specialty_armorvest";
+            break;
+        case "staminup":
+        case "staminup_buy":
+            if(getDvar("mapname") == "zm_prison" && isDefined(level.prison_staminup_origin))
+                return level.prison_staminup_origin;
+            targetname = "vending_marathon";
+            script_noteworthy = "specialty_longersprint";
+            break;
+        case "speedcola":
+            targetname = "vending_sleight";
+            script_noteworthy = "specialty_fastreload";
+            break;
+        case "quickrevive":
+            if(getDvar("mapname") == "zm_tomb")
+                return (2355.26, 5033.44, -303.875);
+            targetname = "vending_revive";
+            script_noteworthy = "specialty_quickrevive";
+            break;
+        case "doubletap":
+        case "doubletap_buy":
+            if(getDvar("mapname") == "zm_tomb" && isDefined(level.tomb_doubletap_origin))
+                return level.tomb_doubletap_origin;
+            targetname = "vending_doubletap";
+            script_noteworthy = "specialty_rof";
+            break;
+    }
+    
+    if(isDefined(targetname))
+    {
+        ent = getEnt(targetname, "targetname");
+        if(isDefined(ent))
+            return ent.origin;
+    }
+    
+    if(isDefined(script_noteworthy))
+    {
+        vending_triggers = getentarray("zombie_vending", "targetname");
+        for(i = 0; i < vending_triggers.size; i++)
+        {
+            if(isDefined(vending_triggers[i].script_noteworthy) && vending_triggers[i].script_noteworthy == script_noteworthy)
+                return vending_triggers[i].origin;
+        }
+    }
+    
+    switch(perk_type)
+    {
+        case "mule_kick":
+            if(isDefined(level.multi_mule_kick_origin)) return level.multi_mule_kick_origin;
+            break;
+        case "jugger":
+            if(isDefined(level.multi_juggernog_origin)) return level.multi_juggernog_origin;
+            break;
+        case "staminup":
+        case "staminup_buy":
+            if(isDefined(level.multi_staminup_origin)) return level.multi_staminup_origin;
+            break;
+        case "speedcola":
+            if(isDefined(level.multi_speedcola_origin)) return level.multi_speedcola_origin;
+            break;
+        case "quickrevive":
+            if(isDefined(level.multi_quickrevive_origin)) return level.multi_quickrevive_origin;
+            break;
+        case "doubletap":
+        case "doubletap_buy":
+            if(isDefined(level.multi_doubletap_origin)) return level.multi_doubletap_origin;
+            break;
+    }
+    
+    return undefined;
+}
+
+get_player_perk_machine_location(perk_type)
+{
+    loc = undefined;
+    switch(perk_type)
+    {
+        case "mule_kick":
+            loc = self.original_mule_kick_machine_location;
+            break;
+        case "jugger":
+            loc = self.original_jugger_machine_location;
+            break;
+        case "staminup":
+            loc = self.original_staminup_machine_location;
+            break;
+        case "speedcola":
+            loc = self.original_speedcola_machine_location;
+            break;
+        case "quickrevive":
+            loc = self.original_quickrevive_machine_location;
+            break;
+        case "doubletap":
+            loc = self.original_doubletap_machine_location;
+            break;
+    }
+    
+    if(!isDefined(loc))
+    {
+        loc = get_perk_machine_location(perk_type);
+        if(isDefined(loc))
+        {
+            switch(perk_type)
+            {
+                case "mule_kick": self.original_mule_kick_machine_location = loc; break;
+                case "jugger": self.original_jugger_machine_location = loc; break;
+                case "staminup": self.original_staminup_machine_location = loc; break;
+                case "speedcola": self.original_speedcola_machine_location = loc; break;
+                case "quickrevive": self.original_quickrevive_machine_location = loc; break;
+                case "doubletap": self.original_doubletap_machine_location = loc; break;
+            }
+        }
+    }
+    else if(getDvar("mapname") == "zm_highrise")
+    {
+        fresh_loc = get_perk_machine_location(perk_type);
+        if(isDefined(fresh_loc))
+        {
+            loc = fresh_loc;
+            switch(perk_type)
+            {
+                case "mule_kick": self.original_mule_kick_machine_location = loc; break;
+                case "jugger": self.original_jugger_machine_location = loc; break;
+                case "staminup": self.original_staminup_machine_location = loc; break;
+                case "speedcola": self.original_speedcola_machine_location = loc; break;
+                case "quickrevive": self.original_quickrevive_machine_location = loc; break;
+                case "doubletap": self.original_doubletap_machine_location = loc; break;
+            }
+        }
+    }
+    return loc;
 }
 
 check_proximity_to_machines()
@@ -216,26 +516,53 @@ check_proximity_to_machines()
     while(true)
     {
         if(self hasPerk("specialty_additionalprimaryweapon") && !self.is_purchasing)
-            self check_perk_proximity("mule_kick", self.original_mule_kick_machine_location, self.last_mule_kick_purchase_time);
+            self check_perk_proximity("mule_kick", self get_player_perk_machine_location("mule_kick"), self.last_mule_kick_purchase_time);
         
         if(self hasPerk("specialty_armorvest") && !self.is_purchasing)
-            self check_perk_proximity("jugger", self.original_jugger_machine_location, self.last_jugger_purchase_time);
+            self check_perk_proximity("jugger", self get_player_perk_machine_location("jugger"), self.last_jugger_purchase_time);
         
         if(self hasPerk("specialty_longersprint") && !self.is_purchasing)
-            self check_perk_proximity("staminup", self.original_staminup_machine_location, self.last_staminup_purchase_time, self.has_jetpack);
+            self check_perk_proximity("staminup", self get_player_perk_machine_location("staminup"), self.last_staminup_purchase_time);
         else if(getdvar("mapname") == "zm_prison" && !self hasPerk("specialty_longersprint") && !self.is_purchasing)
             self check_perk_proximity("staminup_buy", level.prison_staminup_origin, 0);
         
         if(self hasPerk("specialty_fastreload") && !self.is_purchasing)
-            self check_perk_proximity("speedcola", self.original_speedcola_machine_location, self.last_speedcola_purchase_time);
+            self check_perk_proximity("speedcola", self get_player_perk_machine_location("speedcola"), self.last_speedcola_purchase_time);
         
         if(self hasPerk("specialty_quickrevive") && !self.is_purchasing)
-            self check_perk_proximity("quickrevive", self.original_quickrevive_machine_location, self.last_quickrevive_purchase_time, self.has_muscle_milk && self.has_whos_who);
+            self check_perk_proximity("quickrevive", self get_player_perk_machine_location("quickrevive"), self.last_quickrevive_purchase_time, self.has_muscle_milk && self.has_whos_who);
 
         if(self hasPerk("specialty_rof") && !self.is_purchasing)
-            self check_perk_proximity("doubletap", self.original_doubletap_machine_location, self.last_doubletap_purchase_time);
+            self check_perk_proximity("doubletap", self get_player_perk_machine_location("doubletap"), self.last_doubletap_purchase_time);
         else if(getdvar("mapname") == "zm_tomb" && !self hasPerk("specialty_rof") && !self.is_purchasing)
             self check_perk_proximity("doubletap_buy", level.tomb_doubletap_origin, 0);
+        else if(!self hasPerk("specialty_rof") && !self.is_purchasing)
+        {
+            dt_loc = self get_player_perk_machine_location("doubletap");
+            if(isDefined(dt_loc) && distance(self.origin, dt_loc) <= 70)
+            {
+                if(self adsButtonPressed())
+                {
+                    held = true;
+                    for(i = 0; i < 12; i++)
+                    {
+                        wait 0.05;
+                        if(!self adsButtonPressed() || distance(self.origin, dt_loc) > 70)
+                        {
+                            held = false;
+                            break;
+                        }
+                    }
+                    if(held)
+                    {
+                        self playsound("evt_perk_deny");
+                        self iprintln("^1Requires Double Tap Root Beer first!");
+                        while(self adsButtonPressed())
+                            wait 0.05;
+                    }
+                }
+            }
+        }
         
         wait 0.2;
     }
@@ -245,6 +572,13 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
 {
     if(!isDefined(machine_location))
         return;
+
+    perk_name = get_perk_name_for_type(perk_type);
+    if(isDefined(perk_name) && !is_perk_machine_powered(perk_name))
+    {
+        cleanup_perk_trigger(perk_type);
+        return;
+    }
         
     if(distance(self.origin, machine_location) <= 70 && !self.machine_is_in_use && (!isDefined(additional_condition) || !additional_condition))
     {
@@ -255,7 +589,7 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
             else if(perk_type == "jugger")
                 self thread show_multi_juggernog_prompt();
             else if(perk_type == "staminup")
-                self thread show_staminup_jetpack_prompt();
+                self thread show_staminup_prompt();
             else if(perk_type == "staminup_buy")
                 self thread show_staminup_buy_prompt();
             else if(perk_type == "speedcola")
@@ -270,46 +604,7 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
     }
     else
     {
-        if(perk_type == "mule_kick" && isDefined(self.current_mule_kick_trigger))
-        {
-            self.current_mule_kick_trigger delete();
-            self.current_mule_kick_trigger = undefined;
-        }
-        else if(perk_type == "jugger" && isDefined(self.current_jugger_trigger))
-        {
-            self.current_jugger_trigger delete();
-            self.current_jugger_trigger = undefined;
-        }
-        else if(perk_type == "staminup" && isDefined(self.current_staminup_trigger))
-        {
-            self.current_staminup_trigger delete();
-            self.current_staminup_trigger = undefined;
-        }
-        else if(perk_type == "staminup_buy" && isDefined(self.buy_staminup_trigger))
-        {
-            self.buy_staminup_trigger delete();
-            self.buy_staminup_trigger = undefined;
-        }
-        else if(perk_type == "speedcola" && isDefined(self.current_speedcola_trigger))
-        {
-            self.current_speedcola_trigger delete();
-            self.current_speedcola_trigger = undefined;
-        }
-        else if(perk_type == "quickrevive" && isDefined(self.current_quickrevive_trigger))
-        {
-            self.current_quickrevive_trigger delete();
-            self.current_quickrevive_trigger = undefined;
-        }
-        else if(perk_type == "doubletap" && isDefined(self.current_doubletap_trigger))
-        {
-            self.current_doubletap_trigger delete();
-            self.current_doubletap_trigger = undefined;
-        }
-        else if(perk_type == "doubletap_buy" && isDefined(self.buy_doubletap_trigger))
-        {
-            self.buy_doubletap_trigger delete();
-            self.buy_doubletap_trigger = undefined;
-        }
+        cleanup_perk_trigger(perk_type);
     }
 }
 
@@ -334,7 +629,8 @@ show_perk_prompt_core(trigger_var, perk_name, price, machine_location, purchase_
             {
                 self playsound("evt_perk_deny");
                 self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                wait 1;
+                while(self useButtonPressed())
+                    wait 0.05;
             }
         }
         wait 0.1;
@@ -362,7 +658,8 @@ show_buy_prompt_core(trigger_var, perk_name, price, machine_location, purchase_f
             {
                 self playsound("evt_perk_deny");
                 self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                wait 1;
+                while(self useButtonPressed())
+                    wait 0.05;
             }
         }
         wait 0.1;
@@ -375,8 +672,9 @@ show_multi_mule_kick_prompt()
     self endon("death");
     if(!self hasPerk("specialty_additionalprimaryweapon") || self.is_purchasing || !self.can_buy_multi_mule)
         return;
-    if(!isDefined(self.current_mule_kick_trigger))
-        self.current_mule_kick_trigger = create_trigger_radius("Hold ^3[{+activate}]^7 for Multi-Mule Kick [Cost: " + self.mule_kick_price + "]", self.original_mule_kick_machine_location + (0, 0, 30));
+    if(isDefined(self.current_mule_kick_trigger))
+        return;
+    self.current_mule_kick_trigger = create_trigger_radius("Hold ^3[{+activate}]^7 for Multi-Mule Kick [Cost: " + self.mule_kick_price + "]", self.original_mule_kick_machine_location + (0, 0, 30));
     self show_perk_prompt_core(self.current_mule_kick_trigger, "specialty_additionalprimaryweapon", self.mule_kick_price, self.original_mule_kick_machine_location, ::process_multi_mule_kick_purchase, false);
     if(isDefined(self.current_mule_kick_trigger))
     {
@@ -393,20 +691,19 @@ show_multi_juggernog_prompt()
         return;
     if(!self.can_buy_multi_jugger && (self.has_vulture || !self.can_buy_vulture))
         return;
-    if(!isDefined(self.current_jugger_trigger))
+    if(isDefined(self.current_jugger_trigger))
+        return;
+    hint = "";
+    if(self.can_buy_multi_jugger)
+        hint = "Hold ^3[{+activate}]^7 for Multi-Juggernog [Cost: " + self.jugger_price + "]";
+    if(!self.has_vulture && self.can_buy_vulture)
     {
-        hint = "";
-        if(self.can_buy_multi_jugger)
-            hint = "Hold ^3[{+activate}]^7 for Multi-Juggernog [Cost: " + self.jugger_price + "]";
-        if(!self.has_vulture && self.can_buy_vulture)
-        {
-            if(hint != "")
-                hint += " ^1|^7 ";
-            hint += "Press ^3[{+melee}]^7 for Vulture Aid [Cost: " + self.vulture_price + "]";
-        }
         if(hint != "")
-            self.current_jugger_trigger = create_trigger_radius(hint, self.original_jugger_machine_location + (0, 0, 30));
+            hint += " ^1|^7 ";
+        hint += "Press ^3[{+melee}]^7 for Vulture Aid [Cost: " + self.vulture_price + "]";
     }
+    if(hint != "")
+        self.current_jugger_trigger = create_trigger_radius(hint, self.original_jugger_machine_location + (0, 0, 30));
     if(!isDefined(self.current_jugger_trigger))
         return;
     self show_jugg_prompt_core(self.current_jugger_trigger);
@@ -456,7 +753,8 @@ show_jugg_prompt_core(trigger_var)
                 {
                     self playsound("evt_perk_deny");
                     self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                    wait 1;
+                    while(self useButtonPressed() || self meleeButtonPressed())
+                        wait 0.05;
                 }
             }
         }
@@ -468,11 +766,26 @@ show_speedcola_pointcrusher_prompt()
 {
     self endon("disconnect");
     self endon("death");
-    if(!self hasPerk("specialty_fastreload") || self.is_purchasing || !self.can_buy_pointcrusher)
+    if(!self hasPerk("specialty_fastreload") || self.is_purchasing)
         return;
+    if(!self.can_buy_pointcrusher && !self.can_buy_speedcola)
+        return;
+    if(isDefined(self.current_speedcola_trigger))
+        return;
+    hint = "";
+    if(self.can_buy_pointcrusher)
+        hint = "Hold ^3[{+activate}]^7 for Point Crusher [Cost: " + self.pointcrusher_price + "]";
+    if(self.can_buy_speedcola)
+    {
+        if(hint != "")
+            hint += " ^1|^7 ";
+        hint += "Press ^3[{+melee}]^7 for Multi-Speed Cola [Cost: " + self.speedcola_price + "]";
+    }
+    if(hint != "")
+        self.current_speedcola_trigger = create_trigger_radius(hint, self.original_speedcola_machine_location + (0, 0, 30));
     if(!isDefined(self.current_speedcola_trigger))
-        self.current_speedcola_trigger = create_trigger_radius("Hold ^3[{+activate}]^7 for Point Crusher [Cost: " + self.pointcrusher_price + "]", self.original_speedcola_machine_location + (0, 0, 30));
-    self show_perk_prompt_core(self.current_speedcola_trigger, "specialty_fastreload", self.pointcrusher_price, self.original_speedcola_machine_location, ::process_speedcola_pointcrusher_purchase, false);
+        return;
+    self show_speedcola_prompt_core(self.current_speedcola_trigger);
     if(isDefined(self.current_speedcola_trigger))
     {
         self.current_speedcola_trigger delete();
@@ -480,19 +793,130 @@ show_speedcola_pointcrusher_prompt()
     }
 }
 
-show_staminup_jetpack_prompt()
+show_speedcola_prompt_core(trigger_var)
+{
+    while(self isTouching(trigger_var) && self hasPerk("specialty_fastreload") && !self.machine_is_in_use && !self.is_purchasing)
+    {
+        if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+        {
+            if(self.can_buy_pointcrusher && self useButtonPressed() && self.score >= self.pointcrusher_price)
+            {
+                if(distance(self.origin, self.original_speedcola_machine_location) <= 70)
+                {
+                    if(isDefined(trigger_var))
+                    {
+                        trigger_var delete();
+                        self.current_speedcola_trigger = undefined;
+                    }
+                    self thread process_speedcola_pointcrusher_purchase();
+                    break;
+                }
+            }
+            else if(self.can_buy_speedcola && self meleeButtonPressed() && self.score >= self.speedcola_price)
+            {
+                if(distance(self.origin, self.original_speedcola_machine_location) <= 70)
+                {
+                    if(isDefined(trigger_var))
+                    {
+                        trigger_var delete();
+                        self.current_speedcola_trigger = undefined;
+                    }
+                    self thread process_multi_speedcola_purchase();
+                    break;
+                }
+            }
+            else if((self useButtonPressed() && self.can_buy_pointcrusher && self.score < self.pointcrusher_price)
+                || (self meleeButtonPressed() && self.can_buy_speedcola && self.score < self.speedcola_price))
+            {
+                if(distance(self.origin, self.original_speedcola_machine_location) <= 70)
+                {
+                    self playsound("evt_perk_deny");
+                    self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
+                    while(self useButtonPressed() || self meleeButtonPressed())
+                        wait 0.05;
+                }
+            }
+        }
+        wait 0.1;
+    }
+}
+
+show_staminup_prompt()
 {
     self endon("disconnect");
     self endon("death");
-    if(!self hasPerk("specialty_longersprint") || self.is_purchasing || self.has_jetpack || !self.can_buy_jetpack)
+    if(!self hasPerk("specialty_longersprint") || self.is_purchasing)
         return;
+    if((self.has_jetpack || !self.can_buy_jetpack) && !self.can_buy_staminup)
+        return;
+    if(isDefined(self.current_staminup_trigger))
+        return;
+    hint = "";
+    if(!self.has_jetpack && self.can_buy_jetpack)
+        hint = "Hold ^3[{+activate}]^7 for Exo Suit [Cost: " + self.jetpack_price + "]";
+    if(self.can_buy_staminup)
+    {
+        if(hint != "")
+            hint += " ^1|^7 ";
+        hint += "Press ^3[{+melee}]^7 for Multi-Stamin-Up [Cost: " + self.staminup_price + "]";
+    }
+    if(hint != "")
+        self.current_staminup_trigger = create_trigger_radius(hint, self.original_staminup_machine_location + (0, 0, 30));
     if(!isDefined(self.current_staminup_trigger))
-        self.current_staminup_trigger = create_trigger_radius("Hold ^3[{+activate}]^7 for Exo Suit [Cost: " + self.jetpack_price + "]", self.original_staminup_machine_location + (0, 0, 30));
-    self show_perk_prompt_core(self.current_staminup_trigger, "specialty_longersprint", self.jetpack_price, self.original_staminup_machine_location, ::process_staminup_jetpack_purchase, self.has_jetpack);
+        return;
+    self show_staminup_prompt_core(self.current_staminup_trigger);
     if(isDefined(self.current_staminup_trigger))
     {
         self.current_staminup_trigger delete();
         self.current_staminup_trigger = undefined;
+    }
+}
+
+show_staminup_prompt_core(trigger_var)
+{
+    while(self isTouching(trigger_var) && self hasPerk("specialty_longersprint") && !self.machine_is_in_use && !self.is_purchasing)
+    {
+        if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+        {
+            if(!self.has_jetpack && self.can_buy_jetpack && self useButtonPressed() && self.score >= self.jetpack_price)
+            {
+                if(distance(self.origin, self.original_staminup_machine_location) <= 70)
+                {
+                    if(isDefined(trigger_var))
+                    {
+                        trigger_var delete();
+                        self.current_staminup_trigger = undefined;
+                    }
+                    self thread process_staminup_jetpack_purchase();
+                    break;
+                }
+            }
+            else if(self.can_buy_staminup && self meleeButtonPressed() && self.score >= self.staminup_price)
+            {
+                if(distance(self.origin, self.original_staminup_machine_location) <= 70)
+                {
+                    if(isDefined(trigger_var))
+                    {
+                        trigger_var delete();
+                        self.current_staminup_trigger = undefined;
+                    }
+                    self thread process_multi_staminup_purchase();
+                    break;
+                }
+            }
+            else if((self useButtonPressed() && !self.has_jetpack && self.can_buy_jetpack && self.score < self.jetpack_price)
+                || (self meleeButtonPressed() && self.can_buy_staminup && self.score < self.staminup_price))
+            {
+                if(distance(self.origin, self.original_staminup_machine_location) <= 70)
+                {
+                    self playsound("evt_perk_deny");
+                    self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
+                    while(self useButtonPressed() || self meleeButtonPressed())
+                        wait 0.05;
+                }
+            }
+        }
+        wait 0.1;
     }
 }
 
@@ -504,22 +928,21 @@ show_muscle_milk_prompt()
         return;
     if((self.has_muscle_milk || !self.can_buy_muscle_milk) && (self.has_whos_who || !self.can_buy_whos_who))
         return;
-    if(!isDefined(self.current_quickrevive_trigger))
+    if(isDefined(self.current_quickrevive_trigger))
+        return;
+    whos_who_available = !self.has_whos_who && self.can_buy_whos_who && !isDefined(self.e_whos_who_corpse);
+    hint = "";
+    if(!self.has_muscle_milk && self.can_buy_muscle_milk)
     {
-        whos_who_available = !self.has_whos_who && self.can_buy_whos_who && !isDefined(self.e_whos_who_corpse);
-        hint = "";
-        if(!self.has_muscle_milk && self.can_buy_muscle_milk)
-        {
-            if(whos_who_available)
-                hint = "^3[{+activate}]^7 Muscle Milk [" + self.muscle_milk_price + "] ^1|^7 ^3[{+melee}]^7 Who's Who [" + self.whos_who_price + "]";
-            else
-                hint = "Hold ^3[{+activate}]^7 for Muscle Milk [Cost: " + self.muscle_milk_price + "]";
-        }
-        else if(whos_who_available)
-            hint = "Press ^3[{+melee}]^7 for Who's Who [Cost: " + self.whos_who_price + "]";
-        if(hint != "")
-            self.current_quickrevive_trigger = create_trigger_radius(hint, self.original_quickrevive_machine_location + (0, 0, 30));
+        if(whos_who_available)
+            hint = "^3[{+activate}]^7 Muscle Milk [" + self.muscle_milk_price + "] ^1|^7 ^3[{+melee}]^7 Who's Who [" + self.whos_who_price + "]";
+        else
+            hint = "Hold ^3[{+activate}]^7 for Muscle Milk [Cost: " + self.muscle_milk_price + "]";
     }
+    else if(whos_who_available)
+        hint = "Press ^3[{+melee}]^7 for Who's Who [Cost: " + self.whos_who_price + "]";
+    if(hint != "")
+        self.current_quickrevive_trigger = create_trigger_radius(hint, self.original_quickrevive_machine_location + (0, 0, 30));
     if(!isDefined(self.current_quickrevive_trigger))
         return;
     self show_quickrevive_prompt_core(self.current_quickrevive_trigger);
@@ -569,7 +992,8 @@ show_quickrevive_prompt_core(trigger_var)
                 {
                     self playsound("evt_perk_deny");
                     self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                    wait 1;
+                    while(self useButtonPressed() || self meleeButtonPressed())
+                        wait 0.05;
                 }
             }
         }
@@ -583,22 +1007,27 @@ show_punchcola_prompt()
     self endon("death");
     if(!self hasPerk("specialty_rof") || self.is_purchasing)
         return;
-    if(!self.can_buy_punchcola && (self.has_winters_wail || !self.can_buy_winters_wail))
+    if(!self.can_buy_punchcola && (self.has_winters_wail || !self.can_buy_winters_wail) && !self.can_buy_doubletap_1)
         return;
-    if(!isDefined(self.current_doubletap_trigger))
+    if(isDefined(self.current_doubletap_trigger))
+        return;
+    hint = "";
+    if(self.can_buy_punchcola)
+        hint = "Hold ^3[{+activate}]^7 for Punch-a-Cola [Cost: " + self.punchcola_price + "]";
+    if(!self.has_winters_wail && self.can_buy_winters_wail)
     {
-        hint = "";
-        if(self.can_buy_punchcola)
-            hint = "Hold ^3[{+activate}]^7 for Punch-a-Cola [Cost: " + self.punchcola_price + "]";
-        if(!self.has_winters_wail && self.can_buy_winters_wail)
-        {
-            if(hint != "")
-                hint += " ^1|^7 ";
-            hint += "Press ^3[{+melee}]^7 for Winter's Wail [Cost: " + self.winters_wail_price + "]";
-        }
         if(hint != "")
-            self.current_doubletap_trigger = create_trigger_radius(hint, self.original_doubletap_machine_location + (0, 0, 30));
+            hint += " ^1|^7 ";
+        hint += "Press ^3[{+melee}]^7 for Winter's Wail [Cost: " + self.winters_wail_price + "]";
     }
+    if(self.can_buy_doubletap_1)
+    {
+        if(hint != "")
+            hint += " ^1|^7 ";
+        hint += "Hold ^3[{+speed_throw}]^7 for Multi-Double Tap 1.0 [Cost: " + self.doubletap_1_price + "]";
+    }
+    if(hint != "")
+        self.current_doubletap_trigger = create_trigger_radius(hint, self.original_doubletap_machine_location + (0, 0, 30));
     if(!isDefined(self.current_doubletap_trigger))
         return;
     self show_doubletap_prompt_core(self.current_doubletap_trigger);
@@ -641,6 +1070,42 @@ show_doubletap_prompt_core(trigger_var)
                     break;
                 }
             }
+            else if(self.can_buy_doubletap_1 && self adsButtonPressed())
+            {
+                if(distance(self.origin, self.original_doubletap_machine_location) <= 70)
+                {
+                    held = true;
+                    for(i = 0; i < 12; i++)
+                    {
+                        wait 0.05;
+                        if(!self adsButtonPressed() || !self isTouching(trigger_var) || self.is_purchasing)
+                        {
+                            held = false;
+                            break;
+                        }
+                    }
+                    if(held)
+                    {
+                        if(self.score >= self.doubletap_1_price)
+                        {
+                            if(isDefined(trigger_var))
+                            {
+                                trigger_var delete();
+                                self.current_doubletap_trigger = undefined;
+                            }
+                            self thread process_doubletap_1_purchase();
+                            break;
+                        }
+                        else
+                        {
+                            self playsound("evt_perk_deny");
+                            self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
+                            while(self adsButtonPressed())
+                                wait 0.05;
+                        }
+                    }
+                }
+            }
             else if((self useButtonPressed() && self.can_buy_punchcola && self.score < self.punchcola_price)
                 || (self meleeButtonPressed() && !self.has_winters_wail && self.score < self.winters_wail_price))
             {
@@ -648,7 +1113,8 @@ show_doubletap_prompt_core(trigger_var)
                 {
                     self playsound("evt_perk_deny");
                     self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                    wait 1;
+                    while(self useButtonPressed() || self meleeButtonPressed())
+                        wait 0.05;
                 }
             }
         }
@@ -855,10 +1321,28 @@ vulture_drop(v_origin)
             playfx(level._effect["powerup_grabbed"], drop.origin);
             if(drop.is_ammo)
             {
+                if(getDvar("mapname") == "zm_buried")
+                {
+                    self playsoundtoplayer("zmb_vulture_drop_pickup_ammo", self);
+                }
+                else
+                {
+                    self playsound("zmb_weap_wall");
+                }
+
                 self vulture_give_ammo();
             }
             else
             {
+                if(getDvar("mapname") == "zm_buried")
+                {
+                    self playsoundtoplayer("zmb_vulture_drop_pickup_money", self);
+                }
+                else
+                {
+                    self playsound("zmb_cha_ching");
+                }
+
                 points = randomintrange(10, 50);
                 self maps\mp\zombies\_zm_score::add_to_player_score(points);
                 self.pers["score"] = self.score;
@@ -1011,6 +1495,27 @@ process_speedcola_pointcrusher_purchase()
     self iprintln("^1Point Crusher Level " + self.multi_pointcrusher_counter + "\n^2Points Multiplier increased to x" + self.point_multiplier);
 }
 
+process_multi_speedcola_purchase()
+{
+    self process_perk_purchase("specialty_fastreload", self.speedcola_price, self.original_speedcola_machine_location, "zombie_perk_bottle_sleight");
+    self.multi_speedcola_counter++;
+    self.speedcola_price = self.starting_speedcola_price * (self.multi_speedcola_counter + 1);
+    self.last_speedcola_purchase_time = GetTime();
+
+    base_mult = 0.5;
+    if(isDefined(level.default_weap_reload_mult) && level.default_weap_reload_mult > 0.0)
+        base_mult = level.default_weap_reload_mult;
+
+    mult = base_mult / (1.0 + (0.20 * self.multi_speedcola_counter));
+    if(mult < 0.05)
+        mult = 0.05;
+
+    self setclientdvar("perk_weapReloadMultiplier", "" + mult);
+    setdvar("perk_weapReloadMultiplier", mult);
+
+    self iprintln("^2Speed Cola Level " + self.multi_speedcola_counter + "\n^2Reload Speed increased by +20%\n^3Total Reload Speed: +" + (self.multi_speedcola_counter * 20) + "% faster!");
+}
+
 process_staminup_jetpack_purchase()
 {
     self process_perk_purchase("specialty_longersprint", self.jetpack_price, self.original_staminup_machine_location, level.staminup_bottle, self.has_jetpack);
@@ -1018,6 +1523,19 @@ process_staminup_jetpack_purchase()
     self.last_staminup_purchase_time = GetTime();
     self iprintln("^2Exo Suit Acquired!\n^3Now you can Boost yourself!\n^1If you Double Jump and Crouch you can cause an explosion!\n^6Hold Aim [{+speed_throw}] while in air to Hover!");
     self thread init_jetpack();
+}
+
+process_multi_staminup_purchase()
+{
+    self process_perk_purchase("specialty_longersprint", self.staminup_price, self.original_staminup_machine_location, level.staminup_bottle);
+    self.multi_staminup_counter++;
+    self.staminup_price = self.starting_staminup_price * (self.multi_staminup_counter + 1);
+    self.last_staminup_purchase_time = GetTime();
+
+    scale = 1.0 + (0.15 * self.multi_staminup_counter);
+    self setmovespeedscale(scale);
+
+    self iprintln("^3Multi-Stamin-Up Level " + self.multi_staminup_counter + "\n^2Speed increased by +15%\n^3Total Speed: +" + (self.multi_staminup_counter * 15) + "% faster!");
 }
 
 process_muscle_milk_purchase()
@@ -1277,6 +1795,30 @@ process_winters_wail_purchase()
     self iprintln("^2Winter's Wail Acquired! ^7[3 charges]\n^3Taking a hit while wounded triggers a frost blast that freezes zombies around you.\n^1Recharges over time, refills every round and with Max Ammo.");
 }
 
+process_doubletap_1_purchase()
+{
+    self process_perk_purchase("specialty_rof", self.doubletap_1_price, self.original_doubletap_machine_location, "zombie_perk_bottle_doubletap");
+    self.has_doubletap_1 = true;
+    self.doubletap_1_level++;
+    self.doubletap_1_counter++;
+    self.doubletap_1_price = self.starting_doubletap_1_price * self.doubletap_1_counter;
+    self.last_doubletap_purchase_time = GetTime();
+
+    rate_boost_pct = self.doubletap_1_level * 15;
+    base_mult = 1.0;
+    if(isDefined(level.default_weap_rate_mult) && level.default_weap_rate_mult > 0.0)
+        base_mult = level.default_weap_rate_mult;
+
+    mult = base_mult / (1.0 + (0.15 * self.doubletap_1_level));
+    if(mult < 0.05)
+        mult = 0.05;
+
+    self setclientdvar("perk_weapRateMultiplier", "" + mult);
+    setdvar("perk_weapRateMultiplier", mult);
+
+    self iprintln("^3Multi-Double Tap 1.0 Level " + self.doubletap_1_level + "\n^2Fire Rate increased by +15%\n^3Total Fire Rate: +" + (self.doubletap_1_level * 15) + "% faster!");
+}
+
 // Winter's Wail (BO4 recreation): defensive frost blast triggered when the
 // player takes a hit while below full health; 3 charges, +1 every 60s,
 // fully refilled on round start and on Max Ammo
@@ -1288,37 +1830,6 @@ monitor_winters_wail()
     self thread winters_wail_recharge();
     self thread winters_wail_round_refill();
     self thread winters_wail_maxammo_refill();
-
-    while(self.has_winters_wail)
-    {
-        self waittill("damage", damage, attacker, direction_vec, point, mod);
-
-        // Filter out non-zombie sources: fall damage, self explosives, lava/fire
-        if(isDefined(mod) && (mod == "MOD_FALLING" || mod == "MOD_SUICIDE"))
-            continue;
-
-        if(!isDefined(attacker))
-            continue;
-
-        is_zombie_attacker = false;
-        if(isDefined(attacker.is_zombie) && attacker.is_zombie)
-            is_zombie_attacker = true;
-        else if(isDefined(attacker.team) && attacker.team == level.zombie_team)
-            is_zombie_attacker = true;
-        else if(isAi(attacker))
-            is_zombie_attacker = true;
-
-        if(!is_zombie_attacker)
-            continue;
-
-        if(self.winters_wail_charges > 0 && !self.winters_wail_lock
-            && self.health < self.maxhealth
-            && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
-        {
-            self.winters_wail_lock = true;
-            self thread winters_wail_blast();
-        }
-    }
 }
 
 winters_wail_recharge()
@@ -1378,9 +1889,22 @@ winters_wail_maxammo_refill()
     }
 }
 
+winters_wail_cooldown()
+{
+    self notify("winters_wail_cooldown_started");
+    self endon("winters_wail_cooldown_started");
+    self endon("disconnect");
+    self endon("death");
+
+    self.winters_wail_lock = true;
+    wait 5;
+    self.winters_wail_lock = false;
+}
+
 winters_wail_blast()
 {
     self.winters_wail_charges--;
+    self thread winters_wail_cooldown();
 
     // 3x layered VFX radial burst for exaggerated frost blast
     self thread play_winters_wail_blast_fx();
@@ -1392,15 +1916,12 @@ winters_wail_blast()
     zombies = getAiArray(level.zombie_team);
     foreach(z in zombies)
     {
-        if(distance(self.origin, z.origin) < 180)
+        if(distance(self.origin, z.origin) < 225)
         {
             z doDamage(100 + level.round_number * 20, z.origin, self);
             z thread winters_wail_freeze();
         }
     }
-
-    wait 5;
-    self.winters_wail_lock = false;
 }
 
 play_winters_wail_blast_fx()
@@ -1410,16 +1931,16 @@ play_winters_wail_blast_fx()
     playfx(level._effect["powerup_grabbed_wave"], self.origin);
     playfx(level._effect["winters_wail_eyes"], self.origin + (0, 0, 30));
 
-    // Radial offsets to expand frost cloud 3x
+    // Radial offsets to expand frost cloud 3x (+25% range)
     offsets = array(
-        (40, 0, 10),
-        (-40, 0, 10),
-        (0, 40, 10),
-        (0, -40, 10),
-        (28, 28, 15),
-        (-28, -28, 15),
-        (28, -28, 15),
-        (-28, 28, 15)
+        (50, 0, 10),
+        (-50, 0, 10),
+        (0, 50, 10),
+        (0, -50, 10),
+        (35, 35, 15),
+        (-35, -35, 15),
+        (35, -35, 15),
+        (-35, 35, 15)
     );
 
     foreach(offset in offsets)
@@ -1430,10 +1951,23 @@ play_winters_wail_blast_fx()
 }
 
 // runs on the zombie: frozen solid first, then thawing (slow), then normal
+winters_wail_emergency_invulnerability(duration)
+{
+    self notify("winters_wail_invuln_started");
+    self endon("winters_wail_invuln_started");
+    self endon("disconnect");
+    self endon("death");
+
+    self.winters_wail_invulnerable = true;
+    wait duration;
+    self.winters_wail_invulnerable = false;
+}
+
 winters_wail_freeze()
 {
     self endon("death");
 
+    self.is_frozen = true;
     playfxontag(level._effect["winters_wail_eyes"], self, "J_SpineUpper");
 
     if(!isDefined(self.zombie_move_speed))
@@ -1456,6 +1990,7 @@ winters_wail_freeze()
     wait 3;
 
     // phase 2: unfreeze and thaw, moving slowly
+    self.is_frozen = false;
     if(isDefined(anchor))
     {
         self unlink();
@@ -1497,14 +2032,14 @@ perk_bought_check()
         
         if(self hasPerk("specialty_additionalprimaryweapon") && !isDefined(self.original_mule_kick_machine_location))
         {
-            self.original_mule_kick_machine_location = level.multi_mule_kick_machine.origin;
+            self.original_mule_kick_machine_location = self get_player_perk_machine_location("mule_kick");
             self.last_mule_kick_purchase_time = GetTime();
             self.can_buy_multi_mule = false; wait 1; self.can_buy_multi_mule = true;
         }
         
         if(self hasPerk("specialty_armorvest") && !isDefined(self.original_jugger_machine_location))
         {
-            self.original_jugger_machine_location = level.multi_juggernog_machine.origin;
+            self.original_jugger_machine_location = self get_player_perk_machine_location("jugger");
             self.last_jugger_purchase_time = GetTime();
             self.can_buy_multi_jugger = false;
             self.can_buy_vulture = false;
@@ -1515,32 +2050,29 @@ perk_bought_check()
         
         if(self hasPerk("specialty_longersprint") && !isDefined(self.original_staminup_machine_location))
         {
-            if (getdvar("mapname") == "zm_prison")
-               self.original_staminup_machine_location = level.prison_staminup_origin;
-            else
-               self.original_staminup_machine_location = level.multi_staminup_machine.origin;
-
+            self.original_staminup_machine_location = self get_player_perk_machine_location("staminup");
             self.last_staminup_purchase_time = GetTime();
-            self.can_buy_jetpack = false; wait 1; self.can_buy_jetpack = true;
+            self.can_buy_jetpack = false;
+            self.can_buy_staminup = false;
+            wait 1;
+            self.can_buy_jetpack = true;
+            self.can_buy_staminup = true;
         }
         
         if(self hasPerk("specialty_fastreload") && !isDefined(self.original_speedcola_machine_location))
         {
-            self.original_speedcola_machine_location = level.multi_speedcola_machine.origin;
+            self.original_speedcola_machine_location = self get_player_perk_machine_location("speedcola");
             self.last_speedcola_purchase_time = GetTime();
-            self.can_buy_pointcrusher = false; wait 1; self.can_buy_pointcrusher = true;
+            self.can_buy_pointcrusher = false;
+            self.can_buy_speedcola = false;
+            wait 1;
+            self.can_buy_pointcrusher = true;
+            self.can_buy_speedcola = true;
         }
         
         if(self hasPerk("specialty_quickrevive") && !isDefined(self.original_quickrevive_machine_location))
         {
-            if (getdvar("mapname") == "zm_tomb") 
-            {
-               self.original_quickrevive_machine_location = (2355.26, 5033.44, -303.875);
-            }
-            else
-            {
-               self.original_quickrevive_machine_location = level.multi_quickrevive_machine.origin;
-            }
+            self.original_quickrevive_machine_location = self get_player_perk_machine_location("quickrevive");
             self.last_quickrevive_purchase_time = GetTime();
             // raise both flags at the same time: if one becomes true earlier the
             // trigger is created in that window with an incomplete hintstring
@@ -1553,18 +2085,16 @@ perk_bought_check()
 
         if(self hasPerk("specialty_rof") && !isDefined(self.original_doubletap_machine_location))
         {
-            if (getdvar("mapname") == "zm_tomb")
-               self.original_doubletap_machine_location = level.tomb_doubletap_origin;
-            else
-               self.original_doubletap_machine_location = level.multi_doubletap_machine.origin;
-
+            self.original_doubletap_machine_location = self get_player_perk_machine_location("doubletap");
             self.last_doubletap_purchase_time = GetTime();
             if(!isDefined(self.punchcola_damage_level)) self.punchcola_damage_level = 1;
             self.can_buy_punchcola = false;
             self.can_buy_winters_wail = false;
+            self.can_buy_doubletap_1 = false;
             wait 1;
             self.can_buy_punchcola = true;
             self.can_buy_winters_wail = true;
+            self.can_buy_doubletap_1 = true;
         }
         
         n = 1;
@@ -1585,69 +2115,303 @@ monitor_perk_status()
     
     while(true)
     {
-        if (!isdefined(level.zombiemode_using_afterlife) || !level.zombiemode_using_afterlife || !is_true(self.afterlife))
+        if ((!isdefined(level.zombiemode_using_afterlife) || !level.zombiemode_using_afterlife || !is_true(self.afterlife)) && !isDefined(self.e_whos_who_corpse))
         {
+            // Mule Kick
             if(!self hasPerk("specialty_additionalprimaryweapon"))
             {
-                self.multi_mule_kick_counter = 1;
-                self.mule_kick_price = self.starting_mule_kick_price;
-                self.original_mule_kick_machine_location = undefined;
-                self.last_mule_kick_purchase_time = 0;
-                self.weapon_limit_counter = 3;
-                if(isDefined(self.current_mule_kick_trigger)) { self.current_mule_kick_trigger delete(); self.current_mule_kick_trigger = undefined; }
+                if(self is_perk_paused("specialty_additionalprimaryweapon") || (is_true(self.had_mule_kick) && !is_perk_machine_powered("specialty_additionalprimaryweapon")))
+                {
+                    if(isDefined(self.current_mule_kick_trigger))
+                    {
+                        self.current_mule_kick_trigger delete();
+                        self.current_mule_kick_trigger = undefined;
+                    }
+                }
+                else
+                {
+                    self.had_mule_kick = false;
+                    self.multi_mule_kick_counter = 1;
+                    self.mule_kick_price = self.starting_mule_kick_price;
+                    self.original_mule_kick_machine_location = undefined;
+                    self.last_mule_kick_purchase_time = 0;
+                    self.weapon_limit_counter = 3;
+                    self.can_buy_multi_mule = false;
+                    if(isDefined(self.current_mule_kick_trigger))
+                    {
+                        self.current_mule_kick_trigger delete();
+                        self.current_mule_kick_trigger = undefined;
+                    }
+                }
+            }
+            else
+            {
+                self.had_mule_kick = true;
+                if(!isDefined(self.original_mule_kick_machine_location))
+                    self.original_mule_kick_machine_location = self get_player_perk_machine_location("mule_kick");
+                if(GetTime() - self.last_mule_kick_purchase_time >= 1000)
+                    self.can_buy_multi_mule = true;
             }
             
+            // Juggernog
             if(!self hasPerk("specialty_armorvest"))
             {
-                self.multi_juggernog_counter = 1;
-                self.jugger_price = self.starting_jugger_price;
-                self.has_vulture = false;
-                self.can_buy_vulture = false;
-                self.original_jugger_machine_location = undefined;
-                self.last_jugger_purchase_time = 0;
-                if(isDefined(self.current_jugger_trigger)) { self.current_jugger_trigger delete(); self.current_jugger_trigger = undefined; }
+                if(self is_perk_paused("specialty_armorvest") || (is_true(self.had_juggernog) && !is_perk_machine_powered("specialty_armorvest")))
+                {
+                    if(isDefined(self.current_jugger_trigger))
+                    {
+                        self.current_jugger_trigger delete();
+                        self.current_jugger_trigger = undefined;
+                    }
+                }
+                else
+                {
+                    self.had_juggernog = false;
+                    self.multi_juggernog_counter = 1;
+                    self.jugger_price = self.starting_jugger_price;
+                    self.has_vulture = false;
+                    self.can_buy_vulture = false;
+                    self.can_buy_multi_jugger = false;
+                    self.original_jugger_machine_location = undefined;
+                    self.last_jugger_purchase_time = 0;
+                    if(isDefined(self.current_jugger_trigger))
+                    {
+                        self.current_jugger_trigger delete();
+                        self.current_jugger_trigger = undefined;
+                    }
+                }
+            }
+            else
+            {
+                self.had_juggernog = true;
+                if(!isDefined(self.original_jugger_machine_location))
+                    self.original_jugger_machine_location = self get_player_perk_machine_location("jugger");
+                if(GetTime() - self.last_jugger_purchase_time >= 1000)
+                {
+                    self.can_buy_multi_jugger = true;
+                    self.can_buy_vulture = true;
+                }
+                if(isDefined(self.multi_juggernog_counter) && self.multi_juggernog_counter > 1)
+                {
+                    min_health = 250 + ((self.multi_juggernog_counter - 1) * 150);
+                    if(self.maxhealth < min_health)
+                    {
+                        self.maxhealth = min_health;
+                        self.health = self.maxhealth;
+                    }
+                }
             }
             
+            // Stamin-Up
             if(!self hasPerk("specialty_longersprint"))
             {
-                self.has_jetpack = false;
-                self.original_staminup_machine_location = undefined;
-                self.last_staminup_purchase_time = 0;
-                if(isDefined(self.current_staminup_trigger)) { self.current_staminup_trigger delete(); self.current_staminup_trigger = undefined; }
+                if(self is_perk_paused("specialty_longersprint") || (is_true(self.had_staminup) && !is_perk_machine_powered("specialty_longersprint")))
+                {
+                    if(isDefined(self.current_staminup_trigger))
+                    {
+                        self.current_staminup_trigger delete();
+                        self.current_staminup_trigger = undefined;
+                    }
+                }
+                else
+                {
+                    self.had_staminup = false;
+                    self.has_jetpack = false;
+                    self.multi_staminup_counter = 0;
+                    self.starting_staminup_price = 2000;
+                    self.staminup_price = self.starting_staminup_price;
+                    self.can_buy_jetpack = false;
+                    self.can_buy_staminup = false;
+                    self setmovespeedscale(1.0);
+                    self.original_staminup_machine_location = undefined;
+                    self.last_staminup_purchase_time = 0;
+                    if(isDefined(self.current_staminup_trigger))
+                    {
+                        self.current_staminup_trigger delete();
+                        self.current_staminup_trigger = undefined;
+                    }
+                }
+            }
+            else
+            {
+                self.had_staminup = true;
+                if(!isDefined(self.original_staminup_machine_location))
+                    self.original_staminup_machine_location = self get_player_perk_machine_location("staminup");
+                if(GetTime() - self.last_staminup_purchase_time >= 1000)
+                {
+                    self.can_buy_jetpack = true;
+                    self.can_buy_staminup = true;
+                }
+                if(isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
+                {
+                    if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+                    {
+                        if(!isDefined(self.n_move_scale) || self.n_move_scale >= 1.0)
+                        {
+                            expected_scale = 1.0 + (0.15 * self.multi_staminup_counter);
+                            self setmovespeedscale(expected_scale);
+                        }
+                    }
+                }
             }
             
+            // Speed Cola
             if(!self hasPerk("specialty_fastreload"))
             {
-                self.multi_pointcrusher_counter = 0;
-                self.pointcrusher_price = self.starting_pointcrusher_price;
-                self.point_multiplier = 1;
-                self.original_speedcola_machine_location = undefined;
-                self.last_speedcola_purchase_time = 0;
-                if(isDefined(self.current_speedcola_trigger)) { self.current_speedcola_trigger delete(); self.current_speedcola_trigger = undefined; }
+                if(self is_perk_paused("specialty_fastreload") || (is_true(self.had_speedcola) && !is_perk_machine_powered("specialty_fastreload")))
+                {
+                    if(isDefined(self.current_speedcola_trigger))
+                    {
+                        self.current_speedcola_trigger delete();
+                        self.current_speedcola_trigger = undefined;
+                    }
+                }
+                else
+                {
+                    self.had_speedcola = false;
+                    self.multi_pointcrusher_counter = 0;
+                    self.pointcrusher_price = self.starting_pointcrusher_price;
+                    self.point_multiplier = 1;
+                    self.multi_speedcola_counter = 0;
+                    self.speedcola_price = self.starting_speedcola_price;
+                    self.can_buy_pointcrusher = false;
+                    self.can_buy_speedcola = false;
+                    if(isDefined(level.default_weap_reload_mult))
+                    {
+                        self setclientdvar("perk_weapReloadMultiplier", "" + level.default_weap_reload_mult);
+                        setdvar("perk_weapReloadMultiplier", level.default_weap_reload_mult);
+                    }
+                    self.original_speedcola_machine_location = undefined;
+                    self.last_speedcola_purchase_time = 0;
+                    if(isDefined(self.current_speedcola_trigger))
+                    {
+                        self.current_speedcola_trigger delete();
+                        self.current_speedcola_trigger = undefined;
+                    }
+                }
+            }
+            else
+            {
+                self.had_speedcola = true;
+                if(!isDefined(self.original_speedcola_machine_location))
+                    self.original_speedcola_machine_location = self get_player_perk_machine_location("speedcola");
+                if(GetTime() - self.last_speedcola_purchase_time >= 1000)
+                {
+                    self.can_buy_pointcrusher = true;
+                    self.can_buy_speedcola = true;
+                }
+                if(isDefined(self.multi_speedcola_counter) && self.multi_speedcola_counter > 0)
+                {
+                    base_mult = 0.5;
+                    if(isDefined(level.default_weap_reload_mult) && level.default_weap_reload_mult > 0.0)
+                        base_mult = level.default_weap_reload_mult;
+                    mult = base_mult / (1.0 + (0.20 * self.multi_speedcola_counter));
+                    if(mult < 0.05) mult = 0.05;
+                    self setclientdvar("perk_weapReloadMultiplier", "" + mult);
+                }
             }
             
+            // Quick Revive
             if(!self hasPerk("specialty_quickrevive"))
             {
-                self.has_muscle_milk = false;
-                self.has_whos_who = false;
-                self.can_buy_whos_who = false;
-                self.original_quickrevive_machine_location = undefined;
-                self.last_quickrevive_purchase_time = 0;
-                if(isDefined(self.current_quickrevive_trigger)) { self.current_quickrevive_trigger delete(); self.current_quickrevive_trigger = undefined; }
+                if(self is_perk_paused("specialty_quickrevive") || (is_true(self.had_quickrevive) && !is_perk_machine_powered("specialty_quickrevive")))
+                {
+                    if(isDefined(self.current_quickrevive_trigger))
+                    {
+                        self.current_quickrevive_trigger delete();
+                        self.current_quickrevive_trigger = undefined;
+                    }
+                }
+                else
+                {
+                    self.had_quickrevive = false;
+                    self.has_muscle_milk = false;
+                    self.has_whos_who = false;
+                    self.can_buy_muscle_milk = false;
+                    self.can_buy_whos_who = false;
+                    self.original_quickrevive_machine_location = undefined;
+                    self.last_quickrevive_purchase_time = 0;
+                    if(isDefined(self.current_quickrevive_trigger))
+                    {
+                        self.current_quickrevive_trigger delete();
+                        self.current_quickrevive_trigger = undefined;
+                    }
+                }
+            }
+            else
+            {
+                self.had_quickrevive = true;
+                if(!isDefined(self.original_quickrevive_machine_location))
+                    self.original_quickrevive_machine_location = self get_player_perk_machine_location("quickrevive");
+                if(GetTime() - self.last_quickrevive_purchase_time >= 1000)
+                {
+                    self.can_buy_muscle_milk = true;
+                    self.can_buy_whos_who = true;
+                }
             }
 
+            // Double Tap
             if(!self hasPerk("specialty_rof"))
             {
-                self.multi_punchcola_counter = 1;
-                self.punchcola_price = self.starting_punchcola_price;
-                self.punchcola_damage_level = 1;
-                self.has_winters_wail = false;
-                self.winters_wail_charges = 0;
-                self.winters_wail_lock = false;
-                self.can_buy_winters_wail = false;
-                self.original_doubletap_machine_location = undefined;
-                self.last_doubletap_purchase_time = 0;
-                if(isDefined(self.current_doubletap_trigger)) { self.current_doubletap_trigger delete(); self.current_doubletap_trigger = undefined; }
+                if(self is_perk_paused("specialty_rof") || (is_true(self.had_doubletap) && !is_perk_machine_powered("specialty_rof")))
+                {
+                    if(isDefined(self.current_doubletap_trigger))
+                    {
+                        self.current_doubletap_trigger delete();
+                        self.current_doubletap_trigger = undefined;
+                    }
+                }
+                else
+                {
+                    self.had_doubletap = false;
+                    self.multi_punchcola_counter = 1;
+                    self.punchcola_price = self.starting_punchcola_price;
+                    self.punchcola_damage_level = 1;
+                    self.has_winters_wail = false;
+                    self.winters_wail_charges = 0;
+                    self.winters_wail_lock = false;
+                    self.can_buy_punchcola = false;
+                    self.can_buy_winters_wail = false;
+                    self.has_doubletap_1 = false;
+                    self.doubletap_1_counter = 1;
+                    self.doubletap_1_price = self.starting_doubletap_1_price;
+                    self.doubletap_1_level = 0;
+                    self.can_buy_doubletap_1 = false;
+                    if(isDefined(level.default_weap_rate_mult))
+                    {
+                        self setclientdvar("perk_weapRateMultiplier", "" + level.default_weap_rate_mult);
+                        setdvar("perk_weapRateMultiplier", level.default_weap_rate_mult);
+                    }
+                    self.original_doubletap_machine_location = undefined;
+                    self.last_doubletap_purchase_time = 0;
+                    if(isDefined(self.current_doubletap_trigger))
+                    {
+                        self.current_doubletap_trigger delete();
+                        self.current_doubletap_trigger = undefined;
+                    }
+                }
+            }
+            else
+            {
+                self.had_doubletap = true;
+                if(!isDefined(self.original_doubletap_machine_location))
+                    self.original_doubletap_machine_location = self get_player_perk_machine_location("doubletap");
+                if(GetTime() - self.last_doubletap_purchase_time >= 1000)
+                {
+                    self.can_buy_punchcola = true;
+                    self.can_buy_winters_wail = true;
+                    self.can_buy_doubletap_1 = true;
+                }
+                if(isDefined(self.doubletap_1_level) && self.doubletap_1_level > 0)
+                {
+                    base_mult = 1.0;
+                    if(isDefined(level.default_weap_rate_mult) && level.default_weap_rate_mult > 0.0)
+                        base_mult = level.default_weap_rate_mult;
+                    mult = base_mult / (1.0 + (0.15 * self.doubletap_1_level));
+                    if(mult < 0.05) mult = 0.05;
+                    self setclientdvar("perk_weapRateMultiplier", "" + mult);
+                    setdvar("perk_weapRateMultiplier", mult);
+                }
             }
         }
         
@@ -1655,17 +2419,254 @@ monitor_perk_status()
     }
 }
 
+player_has_custom_perk(perk)
+{
+    if(isDefined(self.perkarray))
+    {
+        for(i = 0; i < self.perkarray.size; i++)
+        {
+            if(isDefined(self.perkarray[i]) && isDefined(self.perkarray[i].name) && self.perkarray[i].name == perk)
+                return true;
+        }
+    }
+    return false;
+}
+
 custom_get_player_weapon_limit(player)
 {
     weapon_limit = 2;
+    has_mule = false;
     if(player hasPerk("specialty_additionalprimaryweapon"))
-        weapon_limit = player.weapon_limit_counter;
+        has_mule = true;
+    else if(player player_has_custom_perk("MULE"))
+        has_mule = true;
+
+    if(has_mule)
+    {
+        if(isDefined(player.weapon_limit_counter) && player.weapon_limit_counter >= 3)
+            weapon_limit = player.weapon_limit_counter;
+        else
+            weapon_limit = 3;
+    }
     else 
     {
         weapons = player getWeaponsListPrimaries();
-        if(weapons.size > 2) player takeWeapon(weapons[2]);
+        if(weapons.size > 2)
+            player takeWeapon(weapons[2]);
     }
     return weapon_limit;
+}
+
+enforce_mod_compatibility()
+{
+    level endon("end_game");
+
+    while(true)
+    {
+        level.get_player_weapon_limit = ::custom_get_player_weapon_limit;
+        level.perk_purchase_limit = 99;
+
+        if(isDefined(level.original_damagecallback) && level.original_damagecallback == ::multi_perks_actor_damage_wrapper)
+        {
+            if(isDefined(level.compat_prev_callbackactordamage) && level.compat_prev_callbackactordamage != ::multi_perks_actor_damage_wrapper)
+                level.original_damagecallback = level.compat_prev_callbackactordamage;
+        }
+
+        if(isDefined(level.callbackactordamage) && level.callbackactordamage != ::multi_perks_actor_damage_wrapper)
+        {
+            level.compat_prev_callbackactordamage = level.callbackactordamage;
+            level.callbackactordamage = ::multi_perks_actor_damage_wrapper;
+        }
+
+        if(!isDefined(level.player_damage_callbacks))
+        {
+            level.player_damage_callbacks = [];
+            level.player_damage_callbacks[0] = ::multi_perks_player_damage_wrapper;
+        }
+        else
+        {
+            needs_wrap = false;
+            for(i = 0; i < level.player_damage_callbacks.size; i++)
+            {
+                if(level.player_damage_callbacks[i] != ::multi_perks_player_damage_wrapper)
+                {
+                    needs_wrap = true;
+                    break;
+                }
+            }
+            if(needs_wrap)
+            {
+                level.compat_prev_player_damage_callbacks = [];
+                for(i = 0; i < level.player_damage_callbacks.size; i++)
+                {
+                    if(level.player_damage_callbacks[i] != ::multi_perks_player_damage_wrapper)
+                    {
+                        level.compat_prev_player_damage_callbacks[level.compat_prev_player_damage_callbacks.size] = level.player_damage_callbacks[i];
+                    }
+                }
+                level.player_damage_callbacks = [];
+                level.player_damage_callbacks[0] = ::multi_perks_player_damage_wrapper;
+            }
+        }
+
+        wait 0.2;
+    }
+}
+
+multi_perks_actor_damage_wrapper( inflictor, attacker, damage, flags, meansofdeath, weapon, vpoint, vdir, shitloc, psoffsettime, boneindex )
+{
+    old_maxhealth = undefined;
+    if(isDefined(attacker) && isPlayer(attacker) && attacker hasPerk("specialty_armorvest") && isDefined(attacker.multi_juggernog_counter) && attacker.multi_juggernog_counter > 1)
+    {
+        old_maxhealth = attacker.maxhealth;
+    }
+
+    if(isDefined(level.compat_prev_callbackactordamage))
+    {
+        self [[ level.compat_prev_callbackactordamage ]]( inflictor, attacker, damage, flags, meansofdeath, weapon, vpoint, vdir, shitloc, psoffsettime, boneindex );
+    }
+
+    if(isDefined(old_maxhealth) && isDefined(attacker) && isPlayer(attacker))
+    {
+        min_jugg_health = 250 + ((attacker.multi_juggernog_counter - 1) * 150);
+        max_jugg_cap = 350 + ((attacker.multi_juggernog_counter - 1) * 150);
+
+        if(attacker.maxhealth < min_jugg_health)
+        {
+            if(attacker.maxhealth == 350 && old_maxhealth >= min_jugg_health)
+            {
+                attacker.maxhealth = old_maxhealth + 1;
+                if(attacker.maxhealth > max_jugg_cap)
+                    attacker.maxhealth = max_jugg_cap;
+                attacker.health = attacker.maxhealth;
+            }
+            else
+            {
+                attacker.maxhealth = min_jugg_health;
+                if(attacker.health > attacker.maxhealth)
+                    attacker.health = attacker.maxhealth;
+            }
+        }
+    }
+}
+
+multi_perks_player_damage_wrapper( einflictor, eattacker, idamage, idflags, smeansofdeath, sweapon, vpoint, vdir, shitloc, psoffsettime, boneindex )
+{
+    final_damage = idamage;
+    if(isDefined(level.compat_prev_player_damage_callbacks))
+    {
+        for(i = 0; i < level.compat_prev_player_damage_callbacks.size; i++)
+        {
+            res = self [[ level.compat_prev_player_damage_callbacks[i] ]]( einflictor, eattacker, final_damage, idflags, smeansofdeath, sweapon, vpoint, vdir, shitloc, psoffsettime, boneindex );
+            if(isDefined(res) && res != -1)
+            {
+                final_damage = res;
+                break;
+            }
+        }
+    }
+
+    if(self hasPerk("specialty_armorvest") && isDefined(self.multi_juggernog_counter) && self.multi_juggernog_counter > 1)
+    {
+        min_jugg_health = 250 + ((self.multi_juggernog_counter - 1) * 150);
+        if(self.maxhealth < min_jugg_health)
+        {
+            self.maxhealth = min_jugg_health;
+        }
+    }
+
+    // Winter's Wail Emergency Save & Frost Blast logic
+    if(isDefined(self.has_winters_wail) && self.has_winters_wail && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+    {
+        is_zombie_damage = false;
+        if(isDefined(eattacker))
+        {
+            if(isDefined(eattacker.is_zombie) && eattacker.is_zombie)
+                is_zombie_damage = true;
+            else if(isDefined(eattacker.team) && eattacker.team == level.zombie_team)
+                is_zombie_damage = true;
+            else if(isAi(eattacker))
+                is_zombie_damage = true;
+        }
+
+        if(isDefined(smeansofdeath) && (smeansofdeath == "MOD_FALLING" || smeansofdeath == "MOD_SUICIDE"))
+            is_zombie_damage = false;
+
+        if(is_zombie_damage)
+        {
+            // If the attacking zombie is currently frozen solid, negate damage
+            if(isDefined(eattacker) && isDefined(eattacker.is_frozen) && eattacker.is_frozen)
+            {
+                return 0;
+            }
+
+            // If recently activated an emergency blast, invulnerability absorbs near-simultaneous hits
+            if(isDefined(self.winters_wail_invulnerable) && self.winters_wail_invulnerable)
+            {
+                return 0;
+            }
+
+            if(self.winters_wail_charges > 0)
+            {
+                // Emergency save condition: health <= 150 OR incoming damage would down the player
+                if(self.health <= 150 || final_damage >= self.health)
+                {
+                    self thread winters_wail_blast();
+                    self thread winters_wail_emergency_invulnerability(1.5);
+
+                    // If incoming damage is lethal, negate it completely so the player does not die!
+                    if(final_damage >= self.health)
+                    {
+                        final_damage = 0;
+                    }
+                }
+                else if(self.health < self.maxhealth && !self.winters_wail_lock)
+                {
+                    self thread winters_wail_blast();
+                    self thread winters_wail_emergency_invulnerability(1.0);
+                }
+            }
+        }
+    }
+
+    return final_damage;
+}
+
+monitor_juggernog_health()
+{
+    self endon("disconnect");
+    for(;;)
+    {
+        if(self hasPerk("specialty_armorvest") && isDefined(self.multi_juggernog_counter) && self.multi_juggernog_counter > 1)
+        {
+            min_health = 250 + ((self.multi_juggernog_counter - 1) * 150);
+            if(self.maxhealth < min_health)
+            {
+                self.maxhealth = min_health;
+            }
+        }
+        wait 0.1;
+    }
+}
+
+monitor_staminup_speed()
+{
+    self endon("disconnect");
+    for(;;)
+    {
+        if(self hasPerk("specialty_longersprint") && isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
+        {
+            if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+            {
+                if(!isDefined(self.n_move_scale) || self.n_move_scale >= 1.0)
+                {
+                    expected_scale = 1.0 + (0.15 * self.multi_staminup_counter);
+                    self setmovespeedscale(expected_scale);
+                }
+            }
+        }
+        wait 0.5;
+    }
 }
 
 init_jetpack()
