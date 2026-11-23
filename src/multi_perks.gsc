@@ -9,9 +9,16 @@
 #include maps\mp\zombies\_zm_laststand;
 #include maps\mp\zombies\_zm_spawner;
 
+main()
+{
+    level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
+}
+
 init()
 {
     level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
+    level thread preload_poltergeist_fx_watcher();
+
     // Winter's Wail: white mist cloud + blue glow, both ship with every map
     level._effect["winters_wail"] = loadfx( "weapon/thunder_gun/fx_thundergun_smoke_cloud" );
     level._effect["winters_wail_eyes"] = loadfx( "maps/zombie/fx_zombie_eye_returned_blue" );
@@ -79,6 +86,7 @@ init()
     {
         level.tomb_doubletap_origin = (-580, 3620, -295);
         level thread spawn_custom_doubletap_machine();
+        level thread init_custom_wunderfizz();
     }
 
     if (getdvar("mapname") == "zm_prison")
@@ -86,10 +94,15 @@ init()
         level.prison_staminup_origin = (197, 8462, 779);
         level thread spawn_custom_staminup_machine();
         level.staminup_bottle = "zombie_perk_bottle_doubletap";
+
+        level.prison_quickrevive_origin = (1948, 10319, 1336);
+        level thread spawn_custom_quickrevive_machine();
+        level.quickrevive_bottle = "zombie_perk_bottle_sleight";
     }
     else
     {
         level.staminup_bottle = "zombie_perk_bottle_marathon";
+        level.quickrevive_bottle = "zombie_perk_bottle_revive";
     }
 
     if ( getdvar("mapname") == "zm_buried" || getdvar("mapname") == "zm_tomb" )
@@ -105,8 +118,46 @@ init()
     level._zm_blocker_trigger_think_return_override = ::repairman_barrier_override;
     level.original_zbarrier_tear_override = level.zbarrier_zombie_tear_notetrack_override;
     level.zbarrier_zombie_tear_notetrack_override = ::repairman_tear_chunk_callback;
+    level thread init_multi_perks_magicbox();
 
     level thread onPlayerConnect();
+}
+
+is_tomb_generator_2_powered()
+{
+    if(getdvar("mapname") != "zm_tomb")
+        return true;
+
+    if(!isDefined(level.zone_capture) || !isDefined(level.zone_capture.zones))
+        return false;
+
+    foreach(zone in level.zone_capture.zones)
+    {
+        if(isDefined(zone.script_int) && zone.script_int == 2)
+        {
+            return zone maps\mp\zombies\_zm_utility::ent_flag("player_controlled");
+        }
+    }
+    return false;
+}
+
+monitor_tomb_doubletap_power(machine)
+{
+    level endon("game_ended");
+    machine.is_powered = undefined;
+    while(true)
+    {
+        powered = is_tomb_generator_2_powered();
+        if(!isDefined(machine.is_powered) || machine.is_powered != powered)
+        {
+            machine.is_powered = powered;
+            if(powered)
+                machine setmodel("zombie_vending_marathon_on");
+            else
+                machine setmodel("zombie_vending_marathon");
+        }
+        wait 1.0;
+    }
 }
 
 spawn_custom_doubletap_machine()  
@@ -117,14 +168,17 @@ spawn_custom_doubletap_machine()
     angles = (0, 90, 0);
       
     machine = spawn("script_model", position);
-    machine setmodel("zombie_vending_marathon_on");
+    machine setmodel("zombie_vending_marathon");
     machine.angles = angles;
+    level.tomb_doubletap_machine = machine;
     
     collision = spawn("script_model", position, 1);
     collision.angles = angles;
     collision setmodel("zm_collision_perks1");
     collision.script_noteworthy = "clip";
     collision disconnectpaths();
+
+    level thread monitor_tomb_doubletap_power(machine);
 }
 
 spawn_custom_staminup_machine()
@@ -145,6 +199,235 @@ spawn_custom_staminup_machine()
     collision disconnectpaths();
 }
 
+spawn_custom_quickrevive_machine()
+{  
+    if(!isDefined(level.prison_quickrevive_origin)) return;
+    
+    position = level.prison_quickrevive_origin;
+    angles = (0, 180, 0);
+      
+    machine = spawn("script_model", position);
+    machine setmodel("p6_zm_al_vending_sleight_on");
+    machine.angles = angles;
+    level.prison_quickrevive_machine = machine;
+    
+    collision = spawn("script_model", position, 1);
+    collision.angles = angles;
+    collision setmodel("zm_collision_perks1");
+    collision.script_noteworthy = "clip";
+    collision disconnectpaths();
+}
+
+motd_afterlife_perk_preservation_watcher()
+{
+    self endon("disconnect");
+    self endon("death");
+
+    if(getdvar("mapname") != "zm_prison")
+        return;
+
+    while(true)
+    {
+        while(!is_true(self.keep_perks) && !is_true(self.afterlife))
+            wait 0.1;
+
+        if(is_true(self.keep_perks))
+        {
+            saved_muscle_milk = is_true(self.has_muscle_milk);
+            saved_whos_who = is_true(self.has_whos_who);
+            saved_fighters_fizz = is_true(self.has_fighters_fizz);
+            saved_no_bear = is_true(self.has_no_bear_brew);
+            saved_no_bear_upg = is_true(self.has_no_bear_brew_upgrade);
+            saved_pack_a_box = isDefined(self.pack_a_box_level) ? self.pack_a_box_level : 0;
+            saved_timeslip = isDefined(self.timeslip_level) ? self.timeslip_level : 0;
+            saved_qr = is_true(self.had_quickrevive) || self hasPerk("specialty_quickrevive") || saved_muscle_milk || saved_whos_who || saved_fighters_fizz;
+
+            saved_multi_staminup = isDefined(self.multi_staminup_counter) ? self.multi_staminup_counter : 0;
+            saved_exo = is_true(self.has_jetpack);
+            saved_bandolier_lvl = isDefined(self.bandolier_bandit_level) ? self.bandolier_bandit_level : 0;
+            saved_bandolier_stash = isDefined(self.bandolier_stash) ? self.bandolier_stash : [];
+            saved_blood = is_true(self.has_blood_bullets);
+            saved_nitrogen = is_true(self.has_nitrogen_cooled);
+
+            while(is_true(self.afterlife) || isDefined(self.e_afterlife_corpse) || is_true(self.keep_perks))
+                wait 0.1;
+
+            wait 0.3;
+
+            if(saved_qr)
+            {
+                if(!self hasPerk("specialty_quickrevive"))
+                {
+                    level.solo_game_free_player_quickrevive = 1;
+                    self maps\mp\zombies\_zm_perks::give_perk("specialty_quickrevive");
+                }
+                if(saved_muscle_milk)
+                {
+                    level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
+                    self.has_muscle_milk = true;
+                    self.muscle_milk_cooldown = false;
+                    self notify("muscle_milk_restart");
+                    self thread monitor_muscle_milk();
+                }
+                if(saved_whos_who)
+                {
+                    self.has_whos_who = true;
+                    self maps\mp\zombies\_zm_perks::give_perk("specialty_finalstand");
+                }
+                if(saved_fighters_fizz)
+                {
+                    self.has_fighters_fizz = true;
+                }
+                if(saved_no_bear)
+                {
+                    self.has_no_bear_brew = true;
+                }
+                if(saved_no_bear_upg)
+                {
+                    self.has_no_bear_brew_upgrade = true;
+                    self.can_move_box_this_round = true;
+                }
+                if(saved_pack_a_box > 0)
+                {
+                    self.has_pack_a_box = true;
+                    self.pack_a_box_level = saved_pack_a_box;
+                }
+                if(saved_timeslip > 0)
+                {
+                    self.has_timeslip = true;
+                    self.timeslip_level = saved_timeslip;
+                }
+                self.had_quickrevive = true;
+            }
+
+            if(self hasPerk("specialty_longersprint"))
+            {
+                if(saved_multi_staminup > 0)
+                    self.multi_staminup_counter = saved_multi_staminup;
+                if(saved_exo)
+                    self.has_jetpack = true;
+                if(saved_bandolier_lvl > 0)
+                {
+                    self.has_bandolier_bandit = true;
+                    self.bandolier_bandit_level = saved_bandolier_lvl;
+                    self.bandolier_stash = saved_bandolier_stash;
+                }
+                if(saved_blood)
+                {
+                    self.has_blood_bullets = true;
+                    self thread blood_bullets_think();
+                }
+                if(saved_nitrogen)
+                {
+                    self.has_nitrogen_cooled = true;
+                    self thread nitrogen_cooled_think();
+                }
+                self.had_staminup = true;
+            }
+        }
+        else
+        {
+            // Involuntary afterlife down (by zombies): player lost all perks!
+            self.has_muscle_milk = false;
+            self.had_quickrevive = false;
+            self.has_whos_who = false;
+            self.has_fighters_fizz = false;
+            self.fighters_fizz_price = 3500;
+            self.can_buy_muscle_milk = false;
+            self.can_buy_whos_who = false;
+            self.can_buy_fighters_fizz = false;
+            self.has_no_bear_brew = false;
+            self.no_bear_brew_price = 2000;
+            self.can_buy_no_bear_brew = false;
+            self.has_no_bear_brew_upgrade = false;
+            self.no_bear_brew_upgrade_price = 2000;
+            self.can_buy_no_bear_brew_upgrade = false;
+            self.can_move_box_this_round = false;
+            self.has_pack_a_box = false;
+            self.pack_a_box_level = 0;
+            self.can_buy_pack_a_box = false;
+            self.has_timeslip = false;
+            self.timeslip_level = 0;
+            self.can_buy_timeslip = false;
+            self.muscle_milk_cooldown = false;
+            self notify("muscle_milk_restart");
+
+            self.multi_staminup_counter = 0;
+            self.had_staminup = false;
+            self.has_jetpack = false;
+            self.can_buy_jetpack = false;
+            self.can_buy_staminup = false;
+            self.has_bandolier_bandit = false;
+            self.bandolier_bandit_level = 0;
+            self.bandolier_bandit_price = 3000;
+            self.can_buy_bandolier_bandit = false;
+            self.bandolier_stash = [];
+            if(isDefined(self.bandolier_hud))
+            {
+                self.bandolier_hud destroy();
+                self.bandolier_hud = undefined;
+            }
+            self.has_blood_bullets = false;
+            self.can_buy_blood_bullets = false;
+            self.has_nitrogen_cooled = false;
+            self.can_buy_nitrogen_cooled = false;
+            self notify("stop_blood_bullets");
+            self notify("stop_nitrogen_cooled");
+            self setmovespeedscale(1.0);
+
+            self.had_mule_kick = false;
+            self.multi_mule_kick_counter = 1;
+            self.mule_kick_price = self.starting_mule_kick_price;
+            self.weapon_limit_counter = 3;
+            self.can_buy_multi_mule = false;
+            self.has_ethereal_razor = false;
+            self.ethereal_razor_level = 0;
+            self.ethereal_razor_price = 3000;
+            self.can_buy_ethereal_razor = false;
+
+            self.had_juggernog = false;
+            self.multi_juggernog_counter = 1;
+            self.jugger_price = self.starting_jugger_price;
+            self.has_vulture = false;
+            self.can_buy_vulture = false;
+            self.can_buy_multi_jugger = false;
+            self.has_dam_a_nade = false;
+            self.dam_a_nade_level = 0;
+            self.dam_a_nade_price = 2500;
+            self.can_buy_dam_a_nade = false;
+            self.has_winters_wail = false;
+            self.winters_wail_charges = 0;
+            self.has_vigor_rush = false;
+            self.can_buy_vigor_rush = false;
+            self notify("stop_vigor_rush");
+
+            self.had_speedcola = false;
+            self.multi_speedcola_counter = 0;
+            self.can_buy_speedcola = false;
+            self.has_pointcrusher = false;
+            self.can_buy_pointcrusher = false;
+            self.has_cashback = false;
+            self.cashback_level = 0;
+            self.can_buy_cashback = false;
+            self.has_repairman = false;
+            self.can_buy_repairman = false;
+            self setclientdvar("perk_weapReloadMultiplier", "" + level.default_weap_reload_mult);
+
+            self.had_doubletap = false;
+            self.multi_doubletap_counter = 0;
+            self.can_buy_doubletap = false;
+            self.has_punch_a_cola = false;
+            self.can_buy_punch_a_cola = false;
+            self setclientdvar("perk_weapRateMultiplier", "" + level.default_weap_rate_mult);
+
+            while(is_true(self.afterlife) || isDefined(self.e_afterlife_corpse))
+                wait 0.1;
+        }
+
+        wait 0.2;
+    }
+}
+
 create_trigger_radius(hint_text, origin)
 {
     trigger = spawn("trigger_radius", origin, 1, 70, 70);
@@ -161,6 +444,7 @@ onPlayerConnect()
     for(;;)
     {
         level waittill("connected", player);
+        level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
         player thread onPlayerSpawned();
     }
 }
@@ -172,6 +456,11 @@ onPlayerSpawned()
     for(;;)
     {
         self waittill("spawned_player");
+        level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
+        if(getdvar("mapname") == "zm_prison")
+        {
+            self.waiting_to_revive = 1;
+        }
         self reset_perk_values();
         self thread check_proximity_to_machines();
         self thread perk_bought_check();
@@ -180,6 +469,8 @@ onPlayerSpawned()
         self thread dam_a_nade_round_watcher();
         self thread fighters_fizz_watcher();
         self thread monitor_player_weapons();
+        self thread multi_perks_inactive_box_watcher();
+        self thread motd_afterlife_perk_preservation_watcher();
     }
 }
 
@@ -284,15 +575,35 @@ reset_perk_values()
     self.original_quickrevive_machine_location = undefined;
     self.current_quickrevive_trigger = undefined;
     self.last_quickrevive_purchase_time = 0;
-    self.can_buy_muscle_milk = false;
+    self.can_buy_muscle_milk = true;
 
     self.has_whos_who = false;
     self.whos_who_price = 2000;
-    self.can_buy_whos_who = false;
+    self.can_buy_whos_who = true;
+    self.whos_who_active = false;
 
     self.has_fighters_fizz = false;
     self.fighters_fizz_price = 3500;
-    self.can_buy_fighters_fizz = false;
+    self.can_buy_fighters_fizz = true;
+
+    self.has_no_bear_brew = false;
+    self.no_bear_brew_price = 2000;
+    self.can_buy_no_bear_brew = true;
+    self.has_no_bear_brew_upgrade = false;
+    self.no_bear_brew_upgrade_price = 2000;
+    self.can_buy_no_bear_brew_upgrade = false;
+    self.can_move_box_this_round = false;
+
+    self.has_pack_a_box = false;
+    self.pack_a_box_level = 0;
+    self.pack_a_box_price = 2500;
+    self.can_buy_pack_a_box = true;
+
+    self.has_timeslip = false;
+    self.timeslip_level = 0;
+    self.timeslip_price = 2000;
+    self.timeslip_upgrade_price = 1500;
+    self.can_buy_timeslip = true;
 
     self.hasPunchColaOnce = false;
     self.multi_punchcola_counter = 1;
@@ -333,6 +644,7 @@ reset_perk_values()
     self.had_speedcola = false;
     self.had_quickrevive = false;
     self.had_doubletap = false;
+    self.buy_quickrevive_trigger = undefined;
 
     self.machine_is_in_use = false;
     self.is_purchasing = false;
@@ -351,6 +663,9 @@ is_perk_paused(perk)
 
 is_perk_machine_powered(perk_name)
 {
+    if(getdvar("mapname") == "zm_tomb" && perk_name == "specialty_rof")
+        return is_tomb_generator_2_powered();
+
     vending_triggers = getentarray("zombie_vending", "targetname");
     for(i = 0; i < vending_triggers.size; i++)
     {
@@ -373,12 +688,15 @@ get_perk_name_for_type(perk_type)
         case "jugger":
             return "specialty_armorvest";
         case "staminup":
+        case "staminup_buy":
             return "specialty_longersprint";
         case "speedcola":
             return "specialty_fastreload";
         case "quickrevive":
+        case "quickrevive_buy":
             return "specialty_quickrevive";
         case "doubletap":
+        case "doubletap_buy":
             return "specialty_rof";
     }
     return undefined;
@@ -415,6 +733,11 @@ cleanup_perk_trigger(perk_type)
     {
         self.current_quickrevive_trigger delete();
         self.current_quickrevive_trigger = undefined;
+    }
+    else if(perk_type == "quickrevive_buy" && isDefined(self.buy_quickrevive_trigger))
+    {
+        self.buy_quickrevive_trigger delete();
+        self.buy_quickrevive_trigger = undefined;
     }
     else if(perk_type == "doubletap" && isDefined(self.current_doubletap_trigger))
     {
@@ -455,8 +778,11 @@ get_perk_machine_location(perk_type)
             script_noteworthy = "specialty_fastreload";
             break;
         case "quickrevive":
+        case "quickrevive_buy":
             if(getDvar("mapname") == "zm_tomb")
                 return (2355.26, 5033.44, -303.875);
+            if(getDvar("mapname") == "zm_prison" && isDefined(level.prison_quickrevive_origin))
+                return level.prison_quickrevive_origin;
             targetname = "vending_revive";
             script_noteworthy = "specialty_quickrevive";
             break;
@@ -581,6 +907,21 @@ check_proximity_to_machines()
     
     while(true)
     {
+        if(is_true(self.afterlife))
+        {
+            self cleanup_perk_trigger("mule_kick");
+            self cleanup_perk_trigger("jugger");
+            self cleanup_perk_trigger("staminup");
+            self cleanup_perk_trigger("staminup_buy");
+            self cleanup_perk_trigger("speedcola");
+            self cleanup_perk_trigger("quickrevive");
+            self cleanup_perk_trigger("quickrevive_buy");
+            self cleanup_perk_trigger("doubletap");
+            self cleanup_perk_trigger("doubletap_buy");
+            wait 0.2;
+            continue;
+        }
+
         if(self hasPerk("specialty_additionalprimaryweapon") && !self.is_purchasing)
             self check_perk_proximity("mule_kick", self get_player_perk_machine_location("mule_kick"), self.last_mule_kick_purchase_time);
         
@@ -596,7 +937,12 @@ check_proximity_to_machines()
             self check_perk_proximity("speedcola", self get_player_perk_machine_location("speedcola"), self.last_speedcola_purchase_time);
         
         if(self hasPerk("specialty_quickrevive") && !self.is_purchasing)
-            self check_perk_proximity("quickrevive", self get_player_perk_machine_location("quickrevive"), self.last_quickrevive_purchase_time, self.has_muscle_milk && self.has_whos_who && self.has_fighters_fizz);
+        {
+            all_qr_bought = self.has_muscle_milk && self.has_whos_who && self.has_fighters_fizz && (self.has_no_bear_brew && self.has_no_bear_brew_upgrade) && (self.pack_a_box_level >= 5) && (self.timeslip_level >= 2);
+            self check_perk_proximity("quickrevive", self get_player_perk_machine_location("quickrevive"), self.last_quickrevive_purchase_time, all_qr_bought);
+        }
+        else if(getdvar("mapname") == "zm_prison" && !self hasPerk("specialty_quickrevive") && !self.is_purchasing)
+            self check_perk_proximity("quickrevive_buy", level.prison_quickrevive_origin, 0);
 
         if(self hasPerk("specialty_rof") && !self.is_purchasing)
             self check_perk_proximity("doubletap", self get_player_perk_machine_location("doubletap"), self.last_doubletap_purchase_time);
@@ -639,6 +985,43 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
     if(!isDefined(machine_location))
         return;
 
+    if(getdvar("mapname") == "zm_tomb" && (perk_type == "doubletap" || perk_type == "doubletap_buy"))
+    {
+        if(!is_tomb_generator_2_powered())
+        {
+            if(distance(self.origin, machine_location) <= 70 && !self.machine_is_in_use)
+            {
+                if(!isDefined(self.current_doubletap_trigger) && !isDefined(self.buy_doubletap_trigger))
+                {
+                    self.buy_doubletap_trigger = spawn("trigger_radius", machine_location, 1, 100, 128);
+                    self.buy_doubletap_trigger setcursorhint("HINT_NOICON");
+                    self.buy_doubletap_trigger sethintstring("Power must be turned on");
+                    self.buy_doubletap_trigger setinvisibletoall();
+                    self.buy_doubletap_trigger setvisibletoplayer(self);
+                    self.buy_doubletap_trigger.is_power_off_prompt = true;
+                }
+            }
+            else
+            {
+                cleanup_perk_trigger(perk_type);
+            }
+            return;
+        }
+        else
+        {
+            if(isDefined(self.buy_doubletap_trigger) && is_true(self.buy_doubletap_trigger.is_power_off_prompt))
+            {
+                self.buy_doubletap_trigger delete();
+                self.buy_doubletap_trigger = undefined;
+            }
+            if(isDefined(self.current_doubletap_trigger) && is_true(self.current_doubletap_trigger.is_power_off_prompt))
+            {
+                self.current_doubletap_trigger delete();
+                self.current_doubletap_trigger = undefined;
+            }
+        }
+    }
+
     perk_name = get_perk_name_for_type(perk_type);
     if(isDefined(perk_name) && !is_perk_machine_powered(perk_name))
     {
@@ -662,6 +1045,8 @@ check_perk_proximity(perk_type, machine_location, last_purchase_time, additional
                 self thread show_speedcola_pointcrusher_prompt();
             else if(perk_type == "quickrevive")
                 self thread show_muscle_milk_prompt();
+            else if(perk_type == "quickrevive_buy")
+                self thread show_quickrevive_buy_prompt();
             else if(perk_type == "doubletap")
                 self thread show_punchcola_prompt();
             else if(perk_type == "doubletap_buy")
@@ -1255,6 +1640,29 @@ get_quickrevive_hint_string(is_aiming)
     {
         if(!self.has_fighters_fizz && self.can_buy_fighters_fizz)
             hint = "Hold ^3[{+activate}]^7 for Fighter's Fizz [Cost: " + self.fighters_fizz_price + "]";
+
+        if(!self.has_no_bear_brew && self.can_buy_no_bear_brew)
+        {
+            if(hint != "")
+                hint += " ^1|^7 ";
+            hint += "Press ^3[{+melee}]^7 for No Bear Brew [Cost: " + self.no_bear_brew_price + "]";
+        }
+        else if(self.has_no_bear_brew && !self.has_no_bear_brew_upgrade && self.can_buy_no_bear_brew_upgrade)
+        {
+            if(hint != "")
+                hint += " ^1|^7 ";
+            hint += "Press ^3[{+melee}]^7 for Upgrade No Bear Brew [Cost: " + self.no_bear_brew_upgrade_price + "]";
+        }
+
+        if(self.can_buy_pack_a_box && self.pack_a_box_level < 5)
+        {
+            if(hint != "")
+                hint += " ^1|^7 ";
+            if(self.pack_a_box_level == 0)
+                hint += "Press ^3[{+breath_sprint}]^7 for Pack-A-Box [Cost: " + self.pack_a_box_price + "]";
+            else
+                hint += "Press ^3[{+breath_sprint}]^7 for Upgrade Pack-A-Box [Cost: " + self.pack_a_box_price + "]";
+        }
     }
     else
     {
@@ -1266,7 +1674,27 @@ get_quickrevive_hint_string(is_aiming)
                 hint += " ^1|^7 ";
             hint += "Press ^3[{+melee}]^7 for Who's Who [Cost: " + self.whos_who_price + "]";
         }
-        if(!self.has_fighters_fizz && self.can_buy_fighters_fizz)
+        if(self.can_buy_timeslip || !isDefined(self.timeslip_level) || self.timeslip_level < 2)
+        {
+            if(!self.has_timeslip)
+            {
+                if(hint != "")
+                    hint += " ^1|^7 ";
+                hint += "Press ^3[{+breath_sprint}]^7 for Timeslip [Cost: " + self.timeslip_price + "]";
+            }
+            else if(self.timeslip_level == 1)
+            {
+                if(hint != "")
+                    hint += " ^1|^7 ";
+                hint += "Press ^3[{+breath_sprint}]^7 for Upgrade Timeslip [Cost: " + self.timeslip_upgrade_price + "]";
+            }
+        }
+
+        page2_avail = (!self.has_fighters_fizz && self.can_buy_fighters_fizz)
+            || (!self.has_no_bear_brew && self.can_buy_no_bear_brew)
+            || (self.has_no_bear_brew && !self.has_no_bear_brew_upgrade && self.can_buy_no_bear_brew_upgrade)
+            || (self.can_buy_pack_a_box && self.pack_a_box_level < 5);
+        if(page2_avail)
         {
             if(hint != "")
                 hint += " ^1|^7 ";
@@ -1282,7 +1710,13 @@ show_muscle_milk_prompt()
     self endon("death");
     if(!self hasPerk("specialty_quickrevive") || self.is_purchasing)
         return;
-    if((self.has_muscle_milk || !self.can_buy_muscle_milk) && (self.has_whos_who || !self.can_buy_whos_who) && (self.has_fighters_fizz || !self.can_buy_fighters_fizz))
+    all_qr_bought = (self.has_muscle_milk || !self.can_buy_muscle_milk)
+        && (self.has_whos_who || !self.can_buy_whos_who)
+        && (self.has_fighters_fizz || !self.can_buy_fighters_fizz)
+        && ((self.has_no_bear_brew && self.has_no_bear_brew_upgrade) || (!self.can_buy_no_bear_brew && !self.can_buy_no_bear_brew_upgrade))
+        && (self.pack_a_box_level >= 5 || !self.can_buy_pack_a_box)
+        && (self.timeslip_level >= 2 || !self.can_buy_timeslip);
+    if(all_qr_bought)
         return;
     if(isDefined(self.current_quickrevive_trigger))
         return;
@@ -1302,16 +1736,16 @@ show_muscle_milk_prompt()
 
 show_quickrevive_prompt_core(trigger_var)
 {
-    was_aiming = self adsButtonPressed();
+    last_hint = "";
     while(self isTouching(trigger_var) && self hasPerk("specialty_quickrevive") && !self.machine_is_in_use && !self.is_purchasing)
     {
         if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
         {
             is_aiming = self adsButtonPressed();
-            if(is_aiming != was_aiming)
+            hint = self get_quickrevive_hint_string(is_aiming);
+            if(hint != last_hint)
             {
-                was_aiming = is_aiming;
-                hint = self get_quickrevive_hint_string(is_aiming);
+                last_hint = hint;
                 trigger_var sethintstring(hint);
             }
 
@@ -1330,13 +1764,55 @@ show_quickrevive_prompt_core(trigger_var)
                         break;
                     }
                 }
-                else if(self useButtonPressed() && !self.has_fighters_fizz && self.can_buy_fighters_fizz && self.score < self.fighters_fizz_price)
+                else if(!self.has_no_bear_brew && self.can_buy_no_bear_brew && self meleeButtonPressed() && self.score >= self.no_bear_brew_price)
+                {
+                    if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_quickrevive_trigger = undefined;
+                        }
+                        self thread process_no_bear_brew_purchase();
+                        break;
+                    }
+                }
+                else if(self.has_no_bear_brew && !self.has_no_bear_brew_upgrade && self.can_buy_no_bear_brew_upgrade && self meleeButtonPressed() && self.score >= self.no_bear_brew_upgrade_price)
+                {
+                    if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_quickrevive_trigger = undefined;
+                        }
+                        self thread process_no_bear_brew_purchase();
+                        break;
+                    }
+                }
+                else if(self.can_buy_pack_a_box && self.pack_a_box_level < 5 && self sprintButtonPressed() && self.score >= self.pack_a_box_price)
+                {
+                    if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_quickrevive_trigger = undefined;
+                        }
+                        self thread process_pack_a_box_purchase();
+                        break;
+                    }
+                }
+                else if((self useButtonPressed() && !self.has_fighters_fizz && self.can_buy_fighters_fizz && self.score < self.fighters_fizz_price)
+                    || (self meleeButtonPressed() && !self.has_no_bear_brew && self.can_buy_no_bear_brew && self.score < self.no_bear_brew_price)
+                    || (self meleeButtonPressed() && self.has_no_bear_brew && !self.has_no_bear_brew_upgrade && self.can_buy_no_bear_brew_upgrade && self.score < self.no_bear_brew_upgrade_price)
+                    || (self sprintButtonPressed() && self.can_buy_pack_a_box && self.pack_a_box_level < 5 && self.score < self.pack_a_box_price))
                 {
                     if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
                     {
                         self playsound("evt_perk_deny");
                         self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                        while(self useButtonPressed())
+                        while(self useButtonPressed() || self meleeButtonPressed() || self sprintButtonPressed())
                             wait 0.05;
                     }
                 }
@@ -1369,14 +1845,42 @@ show_quickrevive_prompt_core(trigger_var)
                         break;
                     }
                 }
+                else if((self.can_buy_timeslip || !is_true(self.has_timeslip)) && !self.has_timeslip && self sprintButtonPressed() && self.score >= self.timeslip_price)
+                {
+                    if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_quickrevive_trigger = undefined;
+                        }
+                        self thread process_timeslip_purchase();
+                        break;
+                    }
+                }
+                else if((self.can_buy_timeslip || self.timeslip_level == 1) && self.has_timeslip && self.timeslip_level == 1 && self sprintButtonPressed() && self.score >= self.timeslip_upgrade_price)
+                {
+                    if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_quickrevive_trigger = undefined;
+                        }
+                        self thread process_timeslip_purchase();
+                        break;
+                    }
+                }
                 else if((self useButtonPressed() && !self.has_muscle_milk && self.can_buy_muscle_milk && self.score < self.muscle_milk_price)
-                    || (self meleeButtonPressed() && !self.has_whos_who && self.can_buy_whos_who && self.score < self.whos_who_price))
+                    || (self meleeButtonPressed() && !self.has_whos_who && self.can_buy_whos_who && self.score < self.whos_who_price)
+                    || (self sprintButtonPressed() && !self.has_timeslip && self.score < self.timeslip_price)
+                    || (self sprintButtonPressed() && self.has_timeslip && self.timeslip_level == 1 && self.score < self.timeslip_upgrade_price))
                 {
                     if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
                     {
                         self playsound("evt_perk_deny");
                         self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                        while(self useButtonPressed() || self meleeButtonPressed())
+                        while(self useButtonPressed() || self meleeButtonPressed() || self sprintButtonPressed())
                             wait 0.05;
                     }
                 }
@@ -1613,6 +2117,50 @@ process_staminup_buy()
     self.last_staminup_purchase_time = GetTime();
     self notify("perk_acquired");
     self iprintln("^2Stamin-Up Acquired!\n^1If you do not see the icon, it's because Mob of the Dead does not have one for it.");
+}
+
+show_quickrevive_buy_prompt()
+{
+    self endon("disconnect");
+    self endon("death");
+    if(self hasPerk("specialty_quickrevive") || self.is_purchasing)
+        return;
+    
+    if(isDefined(self.buy_quickrevive_trigger))
+        return;
+
+    if(!isDefined(level.prison_quickrevive_origin)) return;
+
+    qr_cost = 1500;
+    if(is_true(level.is_solo) || getplayers().size <= 1)
+        qr_cost = 500;
+
+    self.buy_quickrevive_trigger = spawn("trigger_radius", level.prison_quickrevive_origin, 1, 100, 128);
+    self.buy_quickrevive_trigger setcursorhint("HINT_NOICON");
+    self.buy_quickrevive_trigger sethintstring("Hold ^3[{+activate}]^7 for Quick Revive [Cost: " + qr_cost + "]");
+    self.buy_quickrevive_trigger setinvisibletoall();
+    self.buy_quickrevive_trigger setvisibletoplayer(self);
+        
+    self show_buy_prompt_core(self.buy_quickrevive_trigger, "specialty_quickrevive", qr_cost, level.prison_quickrevive_origin, ::process_quickrevive_buy);
+    
+    if(isDefined(self.buy_quickrevive_trigger))
+    {
+        self.buy_quickrevive_trigger delete();
+        self.buy_quickrevive_trigger = undefined;
+    }
+}
+
+process_quickrevive_buy()
+{
+    qr_cost = 1500;
+    if(is_true(level.is_solo) || getplayers().size <= 1)
+        qr_cost = 500;
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    self process_perk_purchase("specialty_quickrevive", qr_cost, level.prison_quickrevive_origin, bottle, undefined, true);
+    self maps\mp\zombies\_zm_perks::give_perk( "specialty_quickrevive" );
+    self.last_quickrevive_purchase_time = GetTime();
+    self notify("perk_acquired");
+    self iprintln("^2Quick Revive Acquired!\n^1If you do not see the icon, it's because Mob of the Dead does not have one for it.");
 }
 
 process_perk_purchase(perk_name, price, machine_location, bottle_name, additional_condition, allow_new_purchase)
@@ -2222,11 +2770,81 @@ process_dam_a_nade_purchase()
 
 process_fighters_fizz_purchase()
 {
-    self process_perk_purchase("specialty_quickrevive", self.fighters_fizz_price, self.original_quickrevive_machine_location, "zombie_perk_bottle_revive", self.has_fighters_fizz);
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    self process_perk_purchase("specialty_quickrevive", self.fighters_fizz_price, self.original_quickrevive_machine_location, bottle, self.has_fighters_fizz);
     self.has_fighters_fizz = true;
     self.can_buy_fighters_fizz = false;
     self.last_quickrevive_purchase_time = GetTime();
     self iprintln("^2Fighter's Fizz Acquired!\n^3Keep your weapons when downed!\n^1Kill a zombie while downed to self-revive and keep all perks!");
+}
+
+process_no_bear_brew_purchase()
+{
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    if(!self.has_no_bear_brew)
+    {
+        self process_perk_purchase("specialty_quickrevive", self.no_bear_brew_price, self.original_quickrevive_machine_location, bottle, self.has_no_bear_brew);
+        self.has_no_bear_brew = true;
+        self.can_buy_no_bear_brew = false;
+        self.can_buy_no_bear_brew_upgrade = true;
+        self.last_quickrevive_purchase_time = GetTime();
+        self iprintln("^2No Bear Brew Acquired!\n^3Prevents teddy bears from Mystery Box and bear bottles from Wunderfizz!");
+    }
+    else if(!self.has_no_bear_brew_upgrade)
+    {
+        self process_perk_purchase("specialty_quickrevive", self.no_bear_brew_upgrade_price, self.original_quickrevive_machine_location, bottle, self.has_no_bear_brew_upgrade);
+        self.has_no_bear_brew_upgrade = true;
+        self.can_buy_no_bear_brew_upgrade = false;
+        self.can_move_box_this_round = true;
+        self.last_quickrevive_purchase_time = GetTime();
+        self iprintln("^2No Bear Brew Upgraded!\n^3Can move the Mystery Box or Der Wunderfizz to any inactive location once per round!");
+    }
+}
+
+process_pack_a_box_purchase()
+{
+    if(self.pack_a_box_level >= 5)
+        return;
+
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    self process_perk_purchase("specialty_quickrevive", self.pack_a_box_price, self.original_quickrevive_machine_location, bottle, false);
+    self.has_pack_a_box = true;
+    self.pack_a_box_level++;
+    self.last_quickrevive_purchase_time = GetTime();
+
+    chance_pct = self.pack_a_box_level * 20;
+    self.pack_a_box_price = 2500 * (self.pack_a_box_level + 1);
+
+    if(self.pack_a_box_level >= 5)
+    {
+        self.can_buy_pack_a_box = false;
+        self iprintln("^2Pack-A-Box Level " + self.pack_a_box_level + " [MAX]!\n^3Mystery Box weapons are 100 percent guaranteed to be Pack-A-Punched!");
+    }
+    else
+    {
+        self iprintln("^2Pack-A-Box Level " + self.pack_a_box_level + " Acquired!\n^3Chance to get a Pack-A-Punched weapon from Mystery Box: " + chance_pct + " percent!");
+    }
+}
+
+process_timeslip_purchase()
+{
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    if(!self.has_timeslip)
+    {
+        self process_perk_purchase("specialty_quickrevive", self.timeslip_price, self.original_quickrevive_machine_location, bottle, self.has_timeslip);
+        self.has_timeslip = true;
+        self.timeslip_level = 1;
+        self.last_quickrevive_purchase_time = GetTime();
+        self iprintln("^2Timeslip Acquired!\n^3Speeds up Mystery Box, Der Wunderfizz, and Pack-A-Punch speed!");
+    }
+    else if(self.timeslip_level == 1)
+    {
+        self process_perk_purchase("specialty_quickrevive", self.timeslip_upgrade_price, self.original_quickrevive_machine_location, bottle, false);
+        self.timeslip_level = 2;
+        self.can_buy_timeslip = false;
+        self.last_quickrevive_purchase_time = GetTime();
+        self iprintln("^2Timeslip Upgraded!\n^3Instant Mystery Box, accelerated Der Wunderfizz, and lightning-fast Pack-A-Punch!");
+    }
 }
 
 process_staminup_jetpack_purchase()
@@ -2453,6 +3071,8 @@ blood_bullets_think()
 {
     self endon("disconnect");
     self endon("death");
+    self notify("blood_bullets_think_singleton");
+    self endon("blood_bullets_think_singleton");
 
     while(is_true(self.has_blood_bullets))
     {
@@ -2490,6 +3110,8 @@ nitrogen_cooled_think()
 {
     self endon("disconnect");
     self endon("death");
+    self notify("nitrogen_cooled_think_singleton");
+    self endon("nitrogen_cooled_think_singleton");
 
     while(is_true(self.has_nitrogen_cooled))
     {
@@ -2540,19 +3162,26 @@ nitrogen_cooled_think()
 
 process_muscle_milk_purchase()
 {
-    self process_perk_purchase("specialty_quickrevive", self.muscle_milk_price, self.original_quickrevive_machine_location, "zombie_perk_bottle_revive", self.has_muscle_milk);
+    level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    self process_perk_purchase("specialty_quickrevive", self.muscle_milk_price, self.original_quickrevive_machine_location, bottle, self.has_muscle_milk);
     self.has_muscle_milk = true;
+    self.had_quickrevive = true;
+    self.muscle_milk_cooldown = false;
     self.last_quickrevive_purchase_time = GetTime();
+    self notify("muscle_milk_restart");
     self iprintln("^2Muscle Milk Acquired!\n^3Now you can electrocute when you use your melee weapon.\n^1Cooldown: 15 seconds");
     self thread monitor_muscle_milk();
 }
 
 process_whos_who_purchase()
 {
-    self process_perk_purchase("specialty_quickrevive", self.whos_who_price, self.original_quickrevive_machine_location, "zombie_perk_bottle_revive", self.has_whos_who);
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    self process_perk_purchase("specialty_quickrevive", self.whos_who_price, self.original_quickrevive_machine_location, bottle, self.has_whos_who);
     // give_perk on specialty_finalstand sets lives = 1, which arms the chugabud clone last-stand
     self maps\mp\zombies\_zm_perks::give_perk("specialty_finalstand");
     self.has_whos_who = true;
+    self.whos_who_active = false;
     self.last_quickrevive_purchase_time = GetTime();
     self notify("perk_acquired");
     self iprintln("^2Who's Who Acquired!\n^3When you fall, a clone of you will remain at your body.\n^1Revive yourself before it bleeds out!");
@@ -2567,6 +3196,7 @@ whos_who_laststand()
     self endon("player_suicide");
     self endon("disconnect");
 
+    self.whos_who_active = true;
     self maps\mp\zombies\_zm_laststand::increment_downed_stat();
     self.whos_who_finishing = false;
     self.health = self.maxhealth;
@@ -2613,12 +3243,21 @@ whos_who_laststand()
 
     // solo: re-arm quick revive so falling again in shadow mode self-revives
     saved_lives = self.lives;
+    if(getdvar("mapname") == "zm_prison" && !isDefined(self.motd_saved_afterlife_lives))
+        self.motd_saved_afterlife_lives = (isDefined(self.lives) && self.lives > 0) ? self.lives : 1;
     if(flag("solo_game") && self hasPerk("specialty_quickrevive"))
         self.lives = 1;
 
+    ww_time = 45.0;
+    self thread whos_who_downed_hud(ww_time);
     self thread whos_who_cleanup_on_shadow_down(corpse, saved_lives);
-    corpse thread whos_who_bleed_timer(getdvarfloat(#"player_lastStandBleedoutTime"));
+    corpse thread whos_who_bleed_timer(ww_time);
     corpse waittill_any("player_revived", "bleedout_time_over");
+
+    if(!is_true(self.whos_who_active) || self.whos_who_finishing)
+        return;
+
+    self notify("whos_who_ended");
 
     if(isDefined(corpse.bled_out) && corpse.bled_out)
         self whos_who_finish(corpse, false, saved_lives);
@@ -2631,6 +3270,9 @@ whos_who_finish(corpse, was_revived, saved_lives)
     if(self.whos_who_finishing)
         return;
     self.whos_who_finishing = true;
+    self.whos_who_active = false;
+
+    self notify("whos_who_ended");
 
     if(was_revived)
     {
@@ -2640,15 +3282,138 @@ whos_who_finish(corpse, was_revived, saved_lives)
         playfx(level._effect["chugabud_revive_fx"], corpse.origin);
         if(isDefined(saved_lives))
             self.lives = saved_lives;
+        if(isDefined(self.motd_saved_afterlife_lives))
+        {
+            self.lives = self.motd_saved_afterlife_lives;
+            self.motd_saved_afterlife_lives = undefined;
+        }
+
+        self whos_who_corpse_cleanup(corpse, true);
+        self whos_who_remove_perk();
+        self.whos_who_active = false;
+        self.whos_who_finishing = false;
+        self.e_whos_who_corpse = undefined;
+        self allowstand(true);
+        self allowcrouch(true);
+        self allowprone(true);
+        self setstance("stand");
+        expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+        self setmovespeedscale(expected_scale);
+        self.is_purchasing = false;
+        self.machine_is_in_use = false;
+
+        if(is_true(self.has_muscle_milk))
+        {
+            if(getdvar("mapname") == "zm_prison" && !self hasPerk("specialty_quickrevive"))
+            {
+                level.solo_game_free_player_quickrevive = 1;
+                self maps\mp\zombies\_zm_perks::give_perk("specialty_quickrevive");
+            }
+            self.had_quickrevive = true;
+            self.has_muscle_milk = true;
+            self.muscle_milk_cooldown = false;
+            self notify("muscle_milk_restart");
+            self thread monitor_muscle_milk();
+        }
     }
+    else
+    {
+        corpse_origin = corpse.origin;
+        corpse_angles = corpse.angles;
 
-    self whos_who_corpse_cleanup(corpse, was_revived);
+        self whos_who_corpse_cleanup(corpse, false);
+        self whos_who_remove_perk();
+        self.has_whos_who = false;
+        self.whos_who_active = false;
+        self.can_buy_whos_who = true;
+        self.fighters_fizz_saved_has_whos_who = false;
+        self.whos_who_finishing = false;
+        self.e_whos_who_corpse = undefined;
 
-    // Who's Who is spent (normally already removed when the clone spawned), but
-    // perks, weapons and mod upgrades are all kept
-    self whos_who_remove_perk();
-    self.whos_who_finishing = false;
-    self.e_whos_who_corpse = undefined;
+        // Teleport back to original downed spot
+        self setorigin(corpse_origin);
+        self setplayerangles(corpse_angles);
+
+        // 1. Fighter's Fizz Priority
+        if(is_true(self.has_fighters_fizz))
+        {
+            self.fighters_fizz_from_whos_who = true;
+            cur_primaries = self getweaponslistprimaries();
+            if(isDefined(cur_primaries) && cur_primaries.size > 0)
+                self.fighters_fizz_saved_weapons = cur_primaries;
+            cur_w = self getcurrentweapon();
+            if(isDefined(cur_w) && cur_w != "none" && !maps\mp\zombies\_zm_utility::is_zombie_perk_bottle(cur_w))
+                self.fighters_fizz_saved_active_weapon = cur_w;
+
+            self.fighters_fizz_active = true;
+            if(getdvar("mapname") == "zm_prison")
+            {
+                self.motd_saved_afterlife_lives = isDefined(saved_lives) ? saved_lives : (isDefined(self.lives) ? self.lives : 1);
+                self.fighters_fizz_saved_lives = self.motd_saved_afterlife_lives;
+                self.lives = 0;
+                self.waiting_to_revive = 1;
+            }
+            else if(self hasPerk("specialty_quickrevive"))
+            {
+                self.fighters_fizz_had_quickrevive = true;
+                self.fighters_fizz_saved_lives = isDefined(saved_lives) ? saved_lives : (isDefined(self.lives) ? self.lives : 1);
+                self.lives = 0;
+            }
+
+            self allowstand(false);
+            self allowcrouch(false);
+            self allowprone(true);
+            self setstance("prone");
+            self setmovespeedscale(0.35);
+
+            self thread maps\mp\zombies\_zm_laststand::playerlaststand(undefined, undefined, 1000, "MOD_SUICIDE", "none", (1,0,0), "none", 0, 0);
+            self thread fighters_fizz_active_laststand();
+        }
+        // 2. Solo Quick Revive Priority (without Fighter's Fizz)
+        else if((flag("solo_game") || getplayers().size <= 1) && (self hasPerk("specialty_quickrevive") || (isDefined(saved_lives) && saved_lives > 0)) && getdvar("mapname") != "zm_prison")
+        {
+            if(self hasPerk("specialty_quickrevive"))
+            {
+                self unsetperk("specialty_quickrevive");
+                self.num_perks--;
+                self maps\mp\zombies\_zm_perks::set_perk_clientfield("specialty_quickrevive", 0);
+            }
+            self.lives = max(0, (isDefined(saved_lives) ? saved_lives : 1) - 1);
+            playsoundatposition("evt_ww_appear", corpse_origin);
+            playfx(level._effect["chugabud_revive_fx"], corpse_origin);
+            self iprintlnbold("^3Who's Who expired! Solo Quick Revive activated!");
+            self playsound("zmb_perks_packa_ready");
+            self.health = self.maxhealth;
+            self allowstand(true);
+            self allowcrouch(true);
+            self allowprone(true);
+            self setstance("stand");
+            expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+            self setmovespeedscale(expected_scale);
+        }
+        // 3. Bleedout / death / afterlife
+        else
+        {
+            if(getdvar("mapname") == "zm_prison")
+            {
+                prison_lives = isDefined(saved_lives) ? saved_lives : (isDefined(self.lives) ? self.lives : 0);
+                if(prison_lives > 0)
+                {
+                    self.lives = prison_lives;
+                    self.waiting_to_revive = 1;
+                    if(isDefined(level.compat_prev_player_damage_callbacks))
+                    {
+                        for(i = 0; i < level.compat_prev_player_damage_callbacks.size; i++)
+                        {
+                            self [[ level.compat_prev_player_damage_callbacks[i] ]]( self, self, 1000, 0, "MOD_SUICIDE", "none", self.origin, (0, 0, 1), "none", 0, 0 );
+                        }
+                    }
+                    return;
+                }
+            }
+            self dodamage(self.health + 1000, self.origin);
+        }
+    }
 }
 
 whos_who_remove_perk()
@@ -2681,38 +3446,114 @@ whos_who_cleanup_on_shadow_down(corpse, saved_lives)
 {
     self endon("disconnect");
 
-    while(isDefined(self.e_whos_who_corpse) && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+    while(isDefined(self.e_whos_who_corpse) && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.afterlife))
         wait 0.1;
 
     if(!isDefined(self.e_whos_who_corpse))
         return;
 
-    // the player fell again in shadow mode: remove the original body so there
-    // are no doubles and let the normal last stand / quick revive flow take over
-    self whos_who_corpse_cleanup(corpse, false);
+    // the player fell again in shadow mode: teleport back to original downed spot
+    corpse_origin = corpse.origin;
+    corpse_angles = corpse.angles;
+    self setorigin(corpse_origin);
+    self setplayerangles(corpse_angles);
+
+    self.whos_who_active = false;
     self.whos_who_finishing = false;
     self.e_whos_who_corpse = undefined;
     self whos_who_remove_perk();
     self.has_whos_who = false;
     self.can_buy_whos_who = true;
     self.fighters_fizz_saved_has_whos_who = false;
+    self notify("whos_who_ended");
+    self thread whos_who_corpse_cleanup(corpse, false);
 
+    // 1. Fighter's Fizz Priority
     if(is_true(self.has_fighters_fizz))
     {
-        level.no_end_game_check = 1;
+        self.fighters_fizz_from_whos_who = true;
+        cur_primaries = self getweaponslistprimaries();
+        if(isDefined(cur_primaries) && cur_primaries.size > 0)
+            self.fighters_fizz_saved_weapons = cur_primaries;
+        cur_w = self getcurrentweapon();
+        if(isDefined(cur_w) && cur_w != "none" && !maps\mp\zombies\_zm_utility::is_zombie_perk_bottle(cur_w))
+            self.fighters_fizz_saved_active_weapon = cur_w;
+
         self.fighters_fizz_active = true;
-        if(self hasPerk("specialty_quickrevive") && !is_true(self.fighters_fizz_had_quickrevive))
+        if(getdvar("mapname") == "zm_prison")
+        {
+            self.motd_saved_afterlife_lives = isDefined(saved_lives) ? saved_lives : (isDefined(self.lives) ? self.lives : 1);
+            self.fighters_fizz_saved_lives = self.motd_saved_afterlife_lives;
+            self.lives = 0;
+            self.waiting_to_revive = 1;
+        }
+        else if(self hasPerk("specialty_quickrevive") && !is_true(self.fighters_fizz_had_quickrevive))
         {
             self.fighters_fizz_had_quickrevive = true;
             self.fighters_fizz_saved_lives = isDefined(saved_lives) ? saved_lives : (isDefined(self.lives) ? self.lives : 1);
             self.lives = 0;
         }
+        self allowstand(false);
+        self allowcrouch(false);
+        self allowprone(true);
+        self setstance("prone");
+        self setmovespeedscale(0.35);
+
+        if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+        {
+            self thread maps\mp\zombies\_zm_laststand::playerlaststand(undefined, undefined, 1000, "MOD_SUICIDE", "none", (1,0,0), "none", 0, 0);
+        }
         self thread fighters_fizz_active_laststand();
+    }
+    // 2. Solo Quick Revive Priority (without Fighter's Fizz)
+    else if((flag("solo_game") || getplayers().size <= 1) && (self hasPerk("specialty_quickrevive") || (isDefined(saved_lives) && saved_lives > 0)) && getdvar("mapname") != "zm_prison")
+    {
+        if(self hasPerk("specialty_quickrevive"))
+        {
+            self unsetperk("specialty_quickrevive");
+            self.num_perks--;
+            self maps\mp\zombies\_zm_perks::set_perk_clientfield("specialty_quickrevive", 0);
+        }
+        self.lives = max(0, (isDefined(saved_lives) ? saved_lives : 1) - 1);
+        self maps\mp\zombies\_zm_laststand::auto_revive(self);
+        playsoundatposition("evt_ww_appear", corpse_origin);
+        playfx(level._effect["chugabud_revive_fx"], corpse_origin);
+        self iprintlnbold("^3Killed in Shadow Mode! Solo Quick Revive activated!");
+        self playsound("zmb_perks_packa_ready");
+        self allowstand(true);
+        self allowcrouch(true);
+        self allowprone(true);
+        self setstance("stand");
+        expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+        self setmovespeedscale(expected_scale);
+    }
+    // 3. MotD Afterlife / Bleedout
+    else if(getdvar("mapname") == "zm_prison")
+    {
+        prison_lives = isDefined(saved_lives) ? saved_lives : (isDefined(self.lives) ? self.lives : 0);
+        if(prison_lives > 0)
+        {
+            self.lives = prison_lives;
+            self.waiting_to_revive = 1;
+            flag_clear("wait_and_revive");
+            self maps\mp\zombies\_zm_laststand::auto_revive(self);
+            wait 0.05;
+            if(isDefined(level.compat_prev_player_damage_callbacks))
+            {
+                for(i = 0; i < level.compat_prev_player_damage_callbacks.size; i++)
+                {
+                    self [[ level.compat_prev_player_damage_callbacks[i] ]]( self, self, 1000, 0, "MOD_SUICIDE", "none", self.origin, (0, 0, 1), "none", 0, 0 );
+                }
+            }
+        }
     }
 }
 
 whos_who_corpse_cleanup(corpse, was_revived)
 {
+    if(!isDefined(corpse))
+        return;
+
     if(!was_revived)
     {
         playsoundatposition("evt_ww_disappear", corpse.origin);
@@ -2739,7 +3580,8 @@ whos_who_corpse_cleanup(corpse, was_revived)
     }
 
     wait 0.1;
-    corpse delete();
+    if(isDefined(corpse))
+        corpse delete();
     self.e_whos_who_corpse = undefined;
 }
 
@@ -2752,10 +3594,14 @@ whos_who_corpse_cleanup_on_spectator(player)
         wait 0.05;
 
     player.whos_who_finishing = false;
+    player.whos_who_active = false;
     player.e_whos_who_corpse = undefined;
-    player.has_fighters_fizz = false;
-    player.fighters_fizz_active = false;
-    level.no_end_game_check = undefined;
+    if(!is_true(player.fighters_fizz_active))
+    {
+        player.has_fighters_fizz = false;
+        player.fighters_fizz_active = false;
+        level.no_end_game_check = undefined;
+    }
     player whos_who_corpse_cleanup(self, false);
 }
 
@@ -2799,6 +3645,68 @@ whos_who_revive_hud_create()
     self.revive_hud.color = ( 1, 1, 1 );
     self.revive_hud settext("");
     return self.revive_hud;
+}
+
+whos_who_downed_hud(total_time)
+{
+    self endon("disconnect");
+    self endon("death");
+    self endon("whos_who_ended");
+    self endon("player_revived");
+
+    if(!isDefined(total_time) || total_time <= 0)
+        total_time = 45.0;
+
+    time_left = int(total_time);
+
+    hud_title = newclienthudelem(self);
+    hud_title.alignx = "center";
+    hud_title.aligny = "middle";
+    hud_title.horzalign = "center";
+    hud_title.vertalign = "middle";
+    hud_title.font = "default";
+    hud_title.y = 120;
+    hud_title.foreground = true;
+    hud_title.fontscale = 1.4;
+    hud_title.alpha = 1;
+    hud_title.color = (0.3, 0.75, 1);
+
+    hud_sub = newclienthudelem(self);
+    hud_sub.alignx = "center";
+    hud_sub.aligny = "middle";
+    hud_sub.horzalign = "center";
+    hud_sub.vertalign = "middle";
+    hud_sub.font = "default";
+    hud_sub.y = 142;
+    hud_sub.foreground = true;
+    hud_sub.fontscale = 1.2;
+    hud_sub.alpha = 1;
+    hud_sub.color = (1, 1, 1);
+
+    self thread whos_who_hud_cleanup(hud_title, hud_sub);
+
+    while(isDefined(self.e_whos_who_corpse) && time_left > 0)
+    {
+        hud_title settext("^6[WHO'S WHO ACTIVE]^7 Revive your body! Time: ^1" + time_left + "^7s");
+        hud_sub settext("^3Reach your downed clone before it bleeds out!");
+
+        wait 1.0;
+        time_left--;
+    }
+
+    if(isDefined(hud_title))
+        hud_title destroy();
+    if(isDefined(hud_sub))
+        hud_sub destroy();
+}
+
+whos_who_hud_cleanup(hud_title, hud_sub)
+{
+    self waittill_any("disconnect", "death", "whos_who_ended", "player_revived");
+    if(isDefined(hud_title))
+        hud_title destroy();
+    if(isDefined(hud_sub))
+        hud_sub destroy();
 }
 
 process_punchcola_purchase()
@@ -3125,15 +4033,18 @@ perk_bought_check()
         {
             self.original_quickrevive_machine_location = self get_player_perk_machine_location("quickrevive");
             self.last_quickrevive_purchase_time = GetTime();
-            // raise flags at the same time: if one becomes true earlier the
-            // trigger is created in that window with an incomplete hintstring
-            self.can_buy_muscle_milk = false;
-            self.can_buy_whos_who = false;
-            self.can_buy_fighters_fizz = false;
-            wait 1;
             self.can_buy_muscle_milk = true;
             self.can_buy_whos_who = true;
-            self.can_buy_fighters_fizz = true;
+            if(!is_true(self.has_fighters_fizz))
+                self.can_buy_fighters_fizz = true;
+            if(!is_true(self.has_no_bear_brew))
+                self.can_buy_no_bear_brew = true;
+            else if(!is_true(self.has_no_bear_brew_upgrade))
+                self.can_buy_no_bear_brew_upgrade = true;
+            if(self.pack_a_box_level < 5)
+                self.can_buy_pack_a_box = true;
+            if(self.timeslip_level < 2)
+                self.can_buy_timeslip = true;
         }
 
         if(self hasPerk("specialty_rof") && !isDefined(self.original_doubletap_machine_location))
@@ -3176,7 +4087,7 @@ monitor_perk_status()
             continue;
         }
 
-        if ((!isdefined(level.zombiemode_using_afterlife) || !level.zombiemode_using_afterlife || !is_true(self.afterlife)) && !isDefined(self.e_whos_who_corpse))
+        if (!is_true(self.keep_perks) && !isDefined(self.e_whos_who_corpse))
         {
             // Mule Kick
             if(!self hasPerk("specialty_additionalprimaryweapon"))
@@ -3334,7 +4245,7 @@ monitor_perk_status()
                 }
                 if(isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
                 {
-                    if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+                    if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.fighters_fizz_active))
                     {
                         if(!isDefined(self.n_move_scale) || self.n_move_scale >= 1.0)
                         {
@@ -3415,7 +4326,7 @@ monitor_perk_status()
             // Quick Revive
             if(!self hasPerk("specialty_quickrevive"))
             {
-                if(self is_perk_paused("specialty_quickrevive") || (is_true(self.had_quickrevive) && !is_perk_machine_powered("specialty_quickrevive")))
+                if(self is_perk_paused("specialty_quickrevive") || (is_true(self.had_quickrevive) && !is_perk_machine_powered("specialty_quickrevive")) || (getdvar("mapname") == "zm_prison" && (is_true(self.keep_perks) || isDefined(self.e_whos_who_corpse))))
                 {
                     if(isDefined(self.current_quickrevive_trigger))
                     {
@@ -3433,6 +4344,22 @@ monitor_perk_status()
                     self.can_buy_muscle_milk = false;
                     self.can_buy_whos_who = false;
                     self.can_buy_fighters_fizz = false;
+                    self.has_no_bear_brew = false;
+                    self.no_bear_brew_price = 2000;
+                    self.can_buy_no_bear_brew = false;
+                    self.has_no_bear_brew_upgrade = false;
+                    self.no_bear_brew_upgrade_price = 2000;
+                    self.can_buy_no_bear_brew_upgrade = false;
+                    self.can_move_box_this_round = false;
+                    self.has_pack_a_box = false;
+                    self.pack_a_box_level = 0;
+                    self.pack_a_box_price = 2500;
+                    self.can_buy_pack_a_box = false;
+                    self.has_timeslip = false;
+                    self.timeslip_level = 0;
+                    self.timeslip_price = 2000;
+                    self.timeslip_upgrade_price = 1500;
+                    self.can_buy_timeslip = false;
                     self.original_quickrevive_machine_location = undefined;
                     self.last_quickrevive_purchase_time = 0;
                     if(isDefined(self.current_quickrevive_trigger))
@@ -3453,6 +4380,14 @@ monitor_perk_status()
                     self.can_buy_whos_who = true;
                     if(!is_true(self.has_fighters_fizz))
                         self.can_buy_fighters_fizz = true;
+                    if(!is_true(self.has_no_bear_brew))
+                        self.can_buy_no_bear_brew = true;
+                    else if(!is_true(self.has_no_bear_brew_upgrade))
+                        self.can_buy_no_bear_brew_upgrade = true;
+                    if(self.pack_a_box_level < 5)
+                        self.can_buy_pack_a_box = true;
+                    if(self.timeslip_level < 2)
+                        self.can_buy_timeslip = true;
                 }
             }
 
@@ -3642,6 +4577,10 @@ fighters_fizz_game_end_check()
     {
         if(p.sessionstate != "spectator")
         {
+            if(is_true(p.whos_who_active) || isDefined(p.e_whos_who_corpse))
+            {
+                return false;
+            }
             if(is_true(p.fighters_fizz_active))
             {
                 return false;
@@ -3691,7 +4630,7 @@ multi_perks_actor_damage_wrapper( inflictor, attacker, damage, flags, meansofdea
         }
 
         // Muscle Milk: fires shockwave on melee hit
-        if(is_melee && is_true(attacker.has_muscle_milk) && !attacker.muscle_milk_cooldown && !attacker.is_purchasing)
+        if(is_melee && is_true(attacker.has_muscle_milk) && attacker hasPerk("specialty_quickrevive") && !attacker.muscle_milk_cooldown && !attacker.is_purchasing)
         {
             attacker thread muscle_milk_attack(self, vpoint);
         }
@@ -3787,7 +4726,7 @@ multi_perks_actor_damage_wrapper( inflictor, attacker, damage, flags, meansofdea
                 }
 
                 cur_time = GetTime();
-                if(!isDefined(attacker.last_vigor_rush_fx_time) || (cur_time - attacker.last_vigor_rush_fx_time >= 40))
+                if(!isDefined(attacker.last_vigor_rush_fx_time) || (cur_time - attacker.last_vigor_rush_fx_time >= 15))
                 {
                     attacker.last_vigor_rush_fx_time = cur_time;
 
@@ -3882,30 +4821,107 @@ multi_perks_player_damage_wrapper( einflictor, eattacker, idamage, idflags, smea
     }
 
     final_damage = idamage;
-    if(isDefined(level.compat_prev_player_damage_callbacks))
+
+    // 1. Who's Who shadow mode fatal damage handling (across ALL maps):
+    if(final_damage >= self.health && isDefined(self.e_whos_who_corpse) && !is_true(self.afterlife) && !is_true(self.keep_perks) && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
     {
-        for(i = 0; i < level.compat_prev_player_damage_callbacks.size; i++)
+        corpse = self.e_whos_who_corpse;
+        corpse_origin = corpse.origin;
+        corpse_angles = corpse.angles;
+
+        // Teleport back to original downed spot
+        self setorigin(corpse_origin);
+        self setplayerangles(corpse_angles);
+
+        self.whos_who_active = false;
+        self.whos_who_finishing = true;
+        self.e_whos_who_corpse = undefined;
+        self whos_who_remove_perk();
+        self.has_whos_who = false;
+        self.can_buy_whos_who = true;
+        self.fighters_fizz_saved_has_whos_who = false;
+        self notify("whos_who_ended");
+        self thread whos_who_corpse_cleanup(corpse, false);
+
+        // 1A. Fighter's Fizz Priority
+        if(is_true(self.has_fighters_fizz) && !is_true(self.fighters_fizz_active))
         {
-            res = self [[ level.compat_prev_player_damage_callbacks[i] ]]( einflictor, eattacker, final_damage, idflags, smeansofdeath, sweapon, vpoint, vdir, shitloc, psoffsettime, boneindex );
-            if(isDefined(res) && res != -1)
+            self.fighters_fizz_from_whos_who = true;
+            cur_primaries = self getweaponslistprimaries();
+            if(isDefined(cur_primaries) && cur_primaries.size > 0)
+                self.fighters_fizz_saved_weapons = cur_primaries;
+            cur_w = self getcurrentweapon();
+            if(isDefined(cur_w) && cur_w != "none" && !maps\mp\zombies\_zm_utility::is_zombie_perk_bottle(cur_w))
+                self.fighters_fizz_saved_active_weapon = cur_w;
+
+            if(getdvar("mapname") == "zm_prison")
             {
-                final_damage = res;
-                break;
+                if(!isDefined(self.motd_saved_afterlife_lives))
+                {
+                    self.motd_saved_afterlife_lives = (isDefined(self.lives) && self.lives > 0) ? self.lives : 1;
+                }
+                self.fighters_fizz_saved_lives = self.motd_saved_afterlife_lives;
+                self.lives = 0;
+                self.waiting_to_revive = 1;
+            }
+            else if(self hasPerk("specialty_quickrevive"))
+            {
+                self.fighters_fizz_had_quickrevive = true;
+                self.fighters_fizz_saved_lives = isDefined(self.lives) ? self.lives : 1;
+                self.lives = 0;
+            }
+            self.fighters_fizz_active = true;
+            self allowstand(false);
+            self allowcrouch(false);
+            self allowprone(true);
+            self setstance("prone");
+            self setmovespeedscale(0.35);
+
+            self thread maps\mp\zombies\_zm_laststand::playerlaststand(undefined, undefined, 1000, "MOD_SUICIDE", "none", (1,0,0), "none", 0, 0);
+            self thread fighters_fizz_active_laststand();
+            return 0; // Absorbs fatal blow on shadow form, transitioning player directly to Fighter's Fizz Last Stand at corpse_origin!
+        }
+        // 1B. Solo Quick Revive Priority (without Fighter's Fizz)
+        else if((flag("solo_game") || getplayers().size <= 1) && (self hasPerk("specialty_quickrevive") || (isDefined(self.lives) && self.lives > 0)) && getdvar("mapname") != "zm_prison")
+        {
+            if(self hasPerk("specialty_quickrevive"))
+            {
+                self unsetperk("specialty_quickrevive");
+                self.num_perks--;
+                self maps\mp\zombies\_zm_perks::set_perk_clientfield("specialty_quickrevive", 0);
+            }
+            self.lives = max(0, (isDefined(self.lives) ? self.lives : 1) - 1);
+            playsoundatposition("evt_ww_appear", corpse_origin);
+            playfx(level._effect["chugabud_revive_fx"], corpse_origin);
+            self iprintlnbold("^3Killed in Shadow Mode! Solo Quick Revive activated!");
+            self playsound("zmb_perks_packa_ready");
+            self.health = self.maxhealth;
+            self.whos_who_finishing = false;
+            self allowstand(true);
+            self allowcrouch(true);
+            self allowprone(true);
+            self setstance("stand");
+            expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+            self setmovespeedscale(expected_scale);
+            return 0; // Absorbs fatal blow, keeping player alive at corpse_origin!
+        }
+        // 1C. Bleedout / MotD Afterlife
+        else
+        {
+            self.whos_who_finishing = false;
+            if(getdvar("mapname") == "zm_prison")
+            {
+                if(isDefined(self.motd_saved_afterlife_lives))
+                {
+                    self.lives = self.motd_saved_afterlife_lives;
+                    self.motd_saved_afterlife_lives = undefined;
+                }
+                self.waiting_to_revive = 1;
             }
         }
     }
-
-    if(self hasPerk("specialty_armorvest") && isDefined(self.multi_juggernog_counter) && self.multi_juggernog_counter > 1)
-    {
-        min_jugg_health = 250 + ((self.multi_juggernog_counter - 1) * 150);
-        if(self.maxhealth < min_jugg_health)
-        {
-            self.maxhealth = min_jugg_health;
-        }
-    }
-
-    // Winter's Wail Emergency Save & Frost Blast logic
-    if(isDefined(self.has_winters_wail) && self.has_winters_wail && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+    // 2. Winter's Wail Emergency Save & Frost Blast logic (prevents down if charges available):
+    if(isDefined(self.has_winters_wail) && self.has_winters_wail && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !isDefined(self.e_whos_who_corpse))
     {
         is_zombie_damage = false;
         if(isDefined(eattacker))
@@ -3942,12 +4958,7 @@ multi_perks_player_damage_wrapper( einflictor, eattacker, idamage, idflags, smea
                 {
                     self thread winters_wail_blast();
                     self thread winters_wail_emergency_invulnerability(1.5);
-
-                    // If incoming damage is lethal, negate it completely so the player does not die!
-                    if(final_damage >= self.health)
-                    {
-                        final_damage = 0;
-                    }
+                    return 0; // completely absorbs lethal damage, freezing zombies and saving player!
                 }
                 else if(self.health < self.maxhealth && !self.winters_wail_lock)
                 {
@@ -3958,22 +4969,59 @@ multi_perks_player_damage_wrapper( einflictor, eattacker, idamage, idflags, smea
         }
     }
 
-    if(final_damage >= self.health && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+    // 3. Normal fatal damage handling (alive, not in shadow mode) across ALL maps:
+    else if(final_damage >= self.health && !is_true(self.afterlife) && !is_true(self.keep_perks) && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.whos_who_active))
     {
-        if(is_true(self.has_whos_who) && self.lives > 0 && self hasPerk("specialty_finalstand"))
+        // 3A. Who's Who Priority (ALWAYS activates FIRST across all maps):
+        if((is_true(self.has_whos_who) || self hasPerk("specialty_finalstand")) && !isDefined(self.e_whos_who_corpse) && !is_true(self.whos_who_finishing))
         {
-            // Who's Who priority
+            self.whos_who_active = true;
+            self thread whos_who_laststand();
+            return 0; // completely absorbs fatal damage; clone and shadow mode spawned with all perks preserved
         }
-        else if(is_true(self.has_fighters_fizz))
-        {
-            self.fighters_fizz_active = true;
 
-            if(self hasPerk("specialty_quickrevive"))
+        // 3B. Fighter's Fizz Priority (activates if player does not have Who's Who):
+        if(is_true(self.has_fighters_fizz) && !is_true(self.fighters_fizz_active))
+        {
+            if(getdvar("mapname") == "zm_prison")
+            {
+                if(!isDefined(self.motd_saved_afterlife_lives))
+                {
+                    self.motd_saved_afterlife_lives = (isDefined(self.lives) && self.lives > 0) ? self.lives : 1;
+                }
+                self.fighters_fizz_saved_lives = self.motd_saved_afterlife_lives;
+                self.lives = 0; // zero lives temporarily so afterlife_player_damage_callback won't trigger afterlife and strip perks
+                self.waiting_to_revive = 1;
+            }
+            else if(self hasPerk("specialty_quickrevive"))
             {
                 self.fighters_fizz_had_quickrevive = true;
-                self.fighters_fizz_saved_lives = self.lives;
+                self.fighters_fizz_saved_lives = isDefined(self.lives) ? self.lives : 1;
                 self.lives = 0;
             }
+            self.fighters_fizz_active = true;
+        }
+    }
+
+    if(isDefined(level.compat_prev_player_damage_callbacks))
+    {
+        for(i = 0; i < level.compat_prev_player_damage_callbacks.size; i++)
+        {
+            res = self [[ level.compat_prev_player_damage_callbacks[i] ]]( einflictor, eattacker, final_damage, idflags, smeansofdeath, sweapon, vpoint, vdir, shitloc, psoffsettime, boneindex );
+            if(isDefined(res) && res != -1)
+            {
+                final_damage = res;
+                break;
+            }
+        }
+    }
+
+    if(self hasPerk("specialty_armorvest") && isDefined(self.multi_juggernog_counter) && self.multi_juggernog_counter > 1)
+    {
+        min_jugg_health = 250 + ((self.multi_juggernog_counter - 1) * 150);
+        if(self.maxhealth < min_jugg_health)
+        {
+            self.maxhealth = min_jugg_health;
         }
     }
 
@@ -4004,7 +5052,7 @@ monitor_staminup_speed()
     {
         if(self hasPerk("specialty_longersprint") && isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
         {
-            if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+            if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.fighters_fizz_active))
             {
                 if(!isDefined(self.n_move_scale) || self.n_move_scale >= 1.0)
                 {
@@ -4040,7 +5088,7 @@ handle_jetpack_movement()
     
     while(1)
     {
-        if(self.has_jetpack && !self isonground())
+        if(self.has_jetpack && !self isonground() && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.fighters_fizz_active))
         {
             if(self sprintbuttonpressed() || self jumpbuttonpressed()) { wait_network_frame(); continue; }
             
@@ -4178,7 +5226,7 @@ monitor_exo_slide()
         cur_stance = self getstance();
 
         // Player must be on the ground, not downed, and not already sliding
-        if(self isonground() && !is_true(self.is_sliding) && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand())
+        if(self isonground() && !is_true(self.is_sliding) && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.fighters_fizz_active))
         {
             vel = self getvelocity();
             speed_2d = length((vel[0], vel[1], 0));
@@ -4230,8 +5278,12 @@ do_exo_slide()
     playfx(loadfx("bio/player/fx_footstep_dust"), self.origin);
 
     steps = 20;
-    initial_speed = 570;
-    final_speed = 220;
+    speed_scale = 1.0;
+    if(isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
+        speed_scale = 1.0 + (0.10 * self.multi_staminup_counter);
+
+    initial_speed = 570 * speed_scale;
+    final_speed = 220 * speed_scale;
 
     for(i = 0; i < steps; i++)
     {
@@ -4300,11 +5352,31 @@ monitor_muscle_milk()
 {
     self endon("disconnect");
     self endon("death");
+    self endon("muscle_milk_restart");
 
     while(self.has_muscle_milk)
     {
-        if(!self hasPerk("specialty_quickrevive")) { self.has_muscle_milk = false; break; }
+        if(is_true(self.keep_perks) || isDefined(self.e_whos_who_corpse))
+        {
+            wait 0.2;
+            continue;
+        }
+
+        if(!self hasPerk("specialty_quickrevive"))
+        {
+            self.has_muscle_milk = false;
+            break;
+        }
         wait 0.1;
+    }
+}
+
+preload_poltergeist_fx_watcher()
+{
+    while(true)
+    {
+        level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
+        wait 1.0;
     }
 }
 
@@ -4313,30 +5385,39 @@ monitor_muscle_milk()
 muscle_milk_attack(zombie, hit_origin)
 {
     self.muscle_milk_cooldown = true;
-
-    if(isDefined(zombie))
-        playfxontag(level._effect["poltergeist"], zombie, "J_SpineUpper");
-    else
-        playfx(level._effect["poltergeist"], self.origin);
-    self playsound("zmb_turbine_explo");
+    self thread muscle_milk_cooldown_timer();
 
     center = self.origin;
     if(isDefined(hit_origin))
         center = hit_origin;
+    else if(isDefined(zombie) && isDefined(zombie.origin))
+        center = zombie.origin;
+
+    level._effect["poltergeist"] = loadfx( "misc/fx_zombie_couch_effect" );
+
+    if(isDefined(level._effect["poltergeist"]))
+    {
+        playfx(level._effect["poltergeist"], center);
+    }
+    self playsound("zmb_turbine_explo");
 
     zombies = getAiArray(level.zombie_team);
     foreach(z in zombies)
     {
-        if(distance(center, z.origin) < 150) z doDamage(z.health + 777, z.origin, self);
+        if(isDefined(z) && isAlive(z) && distance(center, z.origin) < 150)
+            z doDamage(z.health + 777, z.origin, self);
     }
-
-    self thread muscle_milk_cooldown_timer();
 }
 
 muscle_milk_cooldown_timer()
 {
+    self endon("disconnect");
+    self endon("death");
+    self endon("muscle_milk_restart");
+
     wait 15;
-    if(self.has_muscle_milk) self iprintln("^2Muscle Milk Ready!");
+    if(is_true(self.has_muscle_milk))
+        self iprintln("^2Muscle Milk Ready!");
     self.muscle_milk_cooldown = false;
 }
 
@@ -4474,6 +5555,11 @@ monitor_player_weapons()
                 self.fighters_fizz_saved_has_blood_bullets = self.has_blood_bullets;
                 self.fighters_fizz_saved_has_nitrogen = self.has_nitrogen_cooled;
                 self.fighters_fizz_saved_has_vigor_rush = self.has_vigor_rush;
+                self.fighters_fizz_saved_has_no_bear = self.has_no_bear_brew;
+                self.fighters_fizz_saved_has_no_bear_upg = self.has_no_bear_brew_upgrade;
+                self.fighters_fizz_saved_pack_a_box_lvl = self.pack_a_box_level;
+                self.fighters_fizz_saved_has_timeslip = self.has_timeslip;
+                self.fighters_fizz_saved_timeslip_lvl = self.timeslip_level;
             }
         }
         wait 0.25;
@@ -4487,14 +5573,33 @@ fighters_fizz_watcher()
     {
         self waittill("player_downed");
 
-        if(isDefined(self.e_whos_who_corpse) || is_true(self.whos_who_finishing))
+        // If Who's Who is owned, or active, or clone exists, Who's Who has absolute priority!
+        if(is_true(self.has_whos_who) || is_true(self.whos_who_active) || isDefined(self.e_whos_who_corpse) || is_true(self.whos_who_finishing))
+        {
+            if(is_true(self.has_whos_who) && !is_true(self.whos_who_active) && !isDefined(self.e_whos_who_corpse) && !is_true(self.whos_who_finishing))
+            {
+                self.whos_who_active = true;
+                self thread whos_who_laststand();
+            }
             continue;
+        }
 
         if(!is_true(self.has_fighters_fizz) && !is_true(self.fighters_fizz_active))
             continue;
 
+        self.fighters_fizz_from_whos_who = false;
         self.fighters_fizz_active = true;
-        if(self hasPerk("specialty_quickrevive") && !is_true(self.fighters_fizz_had_quickrevive))
+        if(getdvar("mapname") == "zm_prison")
+        {
+            if(!isDefined(self.motd_saved_afterlife_lives))
+            {
+                self.motd_saved_afterlife_lives = (isDefined(self.lives) && self.lives > 0) ? self.lives : 1;
+            }
+            self.fighters_fizz_saved_lives = self.motd_saved_afterlife_lives;
+            self.lives = 0;
+            self.waiting_to_revive = 1;
+        }
+        else if(self hasPerk("specialty_quickrevive") && !is_true(self.fighters_fizz_had_quickrevive))
         {
             self.fighters_fizz_had_quickrevive = true;
             self.fighters_fizz_saved_lives = self.lives;
@@ -4509,7 +5614,19 @@ fighters_fizz_active_laststand()
     self endon("disconnect");
     self endon("death");
 
+    if(is_true(self.fighters_fizz_running))
+        return;
+    self.fighters_fizz_running = true;
+
     level.no_end_game_check = 1;
+
+    // Force player down into crawl stance and lock out standing and crouching (just prone)
+    self allowstand(false);
+    self allowcrouch(false);
+    self allowprone(true);
+    self setstance("prone");
+    self setmovespeedscale(0.35);
+    self thread fighters_fizz_stance_maintainer();
 
     wait 0.1;
 
@@ -4551,7 +5668,10 @@ fighters_fizz_active_laststand()
 
     self iprintlnbold("^3[FIGHTER'S FIZZ ACTIVATED!]^7");
     self iprintlnbold("^2Kill a zombie to self-revive!");
-    self iprintln("^3[Fighter's Fizz]^7 Press ^2[{+melee}]^7, ^2[{+activate}]^7, or ^2[{+breath_sprint}]^7 to cycle guns");
+    if(!is_true(self.fighters_fizz_from_whos_who))
+    {
+        self iprintln("^3[Fighter's Fizz]^7 Press ^2[{+melee}]^7, ^2[{+activate}]^7, or ^2[{+breath_sprint}]^7 to cycle guns");
+    }
 
     self thread fighters_fizz_downed_hud();
     self thread fighters_fizz_weapon_cycle_watcher();
@@ -4563,6 +5683,8 @@ fighters_fizz_active_laststand()
     level.no_end_game_check = undefined;
     self.whos_who_finishing = false;
     self.e_whos_who_corpse = undefined;
+    self.fighters_fizz_running = undefined;
+    self.fighters_fizz_from_whos_who = undefined;
 
     if(outcome == "fighters_fizz_kill")
     {
@@ -4582,8 +5704,21 @@ fighters_fizz_active_laststand()
             self.lives = 1;
         }
 
+        if(isDefined(self.motd_saved_afterlife_lives))
+        {
+            self.lives = self.motd_saved_afterlife_lives;
+            self.motd_saved_afterlife_lives = undefined;
+        }
+
         self iprintlnbold("^2Fighter's Fizz Activated! Self-Revived!");
         self playsound("zmb_perks_packa_ready");
+
+        self allowstand(true);
+        self allowcrouch(true);
+        self allowprone(true);
+        self setstance("stand");
+        expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+        self setmovespeedscale(expected_scale);
 
         self maps\mp\zombies\_zm_laststand::auto_revive(self);
         self thread fighters_fizz_restore_perks(had_qr, saved_lives);
@@ -4593,7 +5728,33 @@ fighters_fizz_active_laststand()
         self.fighters_fizz_active = false;
         self.has_fighters_fizz = false;
 
-        if(is_true(self.fighters_fizz_had_quickrevive))
+        if(getdvar("mapname") == "zm_prison" && isDefined(self.motd_saved_afterlife_lives) && self.motd_saved_afterlife_lives > 0)
+        {
+            self.lives = self.motd_saved_afterlife_lives;
+            self.motd_saved_afterlife_lives = undefined;
+            self.waiting_to_revive = 1;
+            flag_clear("wait_and_revive");
+
+            self allowstand(true);
+            self allowcrouch(true);
+            self allowprone(true);
+            self setstance("stand");
+            self setmovespeedscale(1.0);
+
+            // Revive player out of Last Stand first so the Afterlife ghost is not downed!
+            self maps\mp\zombies\_zm_laststand::auto_revive(self);
+            wait 0.05;
+
+            if(isDefined(level.compat_prev_player_damage_callbacks))
+            {
+                for(i = 0; i < level.compat_prev_player_damage_callbacks.size; i++)
+                {
+                    self [[ level.compat_prev_player_damage_callbacks[i] ]]( self, self, 1000, 0, "MOD_SUICIDE", "none", self.origin, (0, 0, 1), "none", 0, 0 );
+                }
+            }
+            return;
+        }
+        else if(is_true(self.fighters_fizz_had_quickrevive))
         {
             self.fighters_fizz_had_quickrevive = false;
             self iprintlnbold("^3Quick Revive Activated! (Last Resort)");
@@ -4601,6 +5762,17 @@ fighters_fizz_active_laststand()
             {
                 self.lives = max(0, self.fighters_fizz_saved_lives - 1);
             }
+            if(isDefined(self.motd_saved_afterlife_lives))
+            {
+                self.motd_saved_afterlife_lives = undefined;
+            }
+            self allowstand(true);
+            self allowcrouch(true);
+            self allowprone(true);
+            self setstance("stand");
+            expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+            self setmovespeedscale(expected_scale);
+
             self maps\mp\zombies\_zm_laststand::auto_revive(self);
         }
         else
@@ -4632,7 +5804,39 @@ fighters_fizz_active_laststand()
         had_qr = is_true(self.fighters_fizz_had_quickrevive);
         saved_lives = self.fighters_fizz_saved_lives;
         self.fighters_fizz_had_quickrevive = false;
+        if(isDefined(self.motd_saved_afterlife_lives))
+        {
+            self.lives = self.motd_saved_afterlife_lives;
+            self.motd_saved_afterlife_lives = undefined;
+        }
+        self allowstand(true);
+        self allowcrouch(true);
+        self allowprone(true);
+        self setstance("stand");
+        expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+        self setmovespeedscale(expected_scale);
+
         self thread fighters_fizz_restore_perks(had_qr, saved_lives);
+    }
+}
+
+fighters_fizz_stance_maintainer()
+{
+    self endon("disconnect");
+    self endon("death");
+    self endon("fighters_fizz_ended");
+
+    while(is_true(self.fighters_fizz_active))
+    {
+        self allowstand(false);
+        self allowcrouch(false);
+        self allowprone(true);
+        if(self getstance() != "prone")
+        {
+            self setstance("prone");
+        }
+        self setmovespeedscale(0.35);
+        wait 0.1;
     }
 }
 
@@ -4721,14 +5925,7 @@ fighters_fizz_bleedout_timer()
 
     self thread fighters_fizz_listen_game_bleedout();
 
-    if(is_true(self.fighters_fizz_had_quickrevive))
-        bleedout_time = 30.0;
-    else
-    {
-        bleedout_time = getdvarfloat("player_lastStandBleedoutTime");
-        if(!isDefined(bleedout_time) || bleedout_time <= 0)
-            bleedout_time = 45.0;
-    }
+    bleedout_time = 30.0;
 
     wait max(1.0, bleedout_time - 0.5);
     self notify("fighters_fizz_bleedout");
@@ -4749,14 +5946,7 @@ fighters_fizz_downed_hud()
     self endon("death");
     self endon("fighters_fizz_ended");
 
-    if(is_true(self.fighters_fizz_had_quickrevive))
-        bleedout_time = 30.0;
-    else
-    {
-        bleedout_time = getdvarfloat("player_lastStandBleedoutTime");
-        if(!isDefined(bleedout_time) || bleedout_time <= 0)
-            bleedout_time = 45.0;
-    }
+    bleedout_time = 30.0;
 
     time_left = int(bleedout_time);
 
@@ -4772,24 +5962,29 @@ fighters_fizz_downed_hud()
     hud_title.alpha = 1;
     hud_title.color = (1, 0.85, 0.2);
 
-    hud_sub = newclienthudelem(self);
-    hud_sub.alignx = "center";
-    hud_sub.aligny = "middle";
-    hud_sub.horzalign = "center";
-    hud_sub.vertalign = "middle";
-    hud_sub.font = "default";
-    hud_sub.y = 142;
-    hud_sub.foreground = true;
-    hud_sub.fontscale = 1.2;
-    hud_sub.alpha = 1;
-    hud_sub.color = (1, 1, 1);
+    hud_sub = undefined;
+    if(!is_true(self.fighters_fizz_from_whos_who))
+    {
+        hud_sub = newclienthudelem(self);
+        hud_sub.alignx = "center";
+        hud_sub.aligny = "middle";
+        hud_sub.horzalign = "center";
+        hud_sub.vertalign = "middle";
+        hud_sub.font = "default";
+        hud_sub.y = 142;
+        hud_sub.foreground = true;
+        hud_sub.fontscale = 1.2;
+        hud_sub.alpha = 1;
+        hud_sub.color = (1, 1, 1);
+    }
 
     self thread fighters_fizz_hud_cleanup(hud_title, hud_sub);
 
     while(is_true(self.fighters_fizz_active) && time_left > 0)
     {
         hud_title settext("^3[FIGHTER'S FIZZ ACTIVE]^7 Kill to revive! Time: ^1" + time_left + "^7s");
-        hud_sub settext("^2Press [{+melee}], [{+activate}], or [{+breath_sprint}] to switch guns");
+        if(isDefined(hud_sub))
+            hud_sub settext("^2Press [{+melee}], [{+activate}], or [{+breath_sprint}] to switch guns");
 
         wait 1.0;
         time_left--;
@@ -4833,6 +6028,13 @@ fighters_fizz_restore_perks(had_qr, saved_lives)
         wait 0.1;
     wait 0.2;
 
+    self allowstand(true);
+    self allowcrouch(true);
+    self allowprone(true);
+    self setstance("stand");
+    expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+    self setmovespeedscale(expected_scale);
+
     // Handle Quick Revive restoration without incrementing solo_lives_given or making the machine fly away!
     if(is_true(had_qr))
     {
@@ -4871,6 +6073,12 @@ fighters_fizz_restore_perks(had_qr, saved_lives)
             self.lives = 1;
     }
     self.fighters_fizz_saved_lives = undefined;
+
+    if(getdvar("mapname") == "zm_prison" && isDefined(self.motd_saved_afterlife_lives))
+    {
+        self.lives = self.motd_saved_afterlife_lives;
+        self.motd_saved_afterlife_lives = undefined;
+    }
 
     if(isDefined(self.fighters_fizz_saved_multi_jugg) && self.fighters_fizz_saved_multi_jugg > 1)
     {
@@ -4912,7 +6120,12 @@ fighters_fizz_restore_perks(had_qr, saved_lives)
     }
 
     if(is_true(self.fighters_fizz_saved_has_muscle))
+    {
         self.has_muscle_milk = true;
+        self.muscle_milk_cooldown = false;
+        self notify("muscle_milk_restart");
+        self thread monitor_muscle_milk();
+    }
 
     if(is_true(self.fighters_fizz_saved_has_vulture))
         self.has_vulture = true;
@@ -4989,8 +6202,46 @@ fighters_fizz_restore_perks(had_qr, saved_lives)
         self.has_vigor_rush = true;
     }
 
+    if(is_true(self.fighters_fizz_saved_has_no_bear))
+    {
+        self.has_no_bear_brew = true;
+        if(is_true(self.fighters_fizz_saved_has_no_bear_upg))
+        {
+            self.has_no_bear_brew_upgrade = true;
+            self.can_move_box_this_round = true;
+        }
+    }
+
+    if(isDefined(self.fighters_fizz_saved_pack_a_box_lvl) && self.fighters_fizz_saved_pack_a_box_lvl > 0)
+    {
+        self.has_pack_a_box = true;
+        self.pack_a_box_level = self.fighters_fizz_saved_pack_a_box_lvl;
+        self.pack_a_box_price = 2500 * (self.pack_a_box_level + 1);
+        if(self.pack_a_box_level >= 5)
+            self.can_buy_pack_a_box = false;
+        else
+            self.can_buy_pack_a_box = true;
+    }
+
+    if(is_true(self.fighters_fizz_saved_has_timeslip))
+    {
+        self.has_timeslip = true;
+        self.timeslip_level = self.fighters_fizz_saved_timeslip_lvl;
+        if(self.timeslip_level >= 2)
+            self.can_buy_timeslip = false;
+        else
+            self.can_buy_timeslip = true;
+    }
+
     self.has_fighters_fizz = false;
     self.can_buy_fighters_fizz = true;
+
+    self allowstand(true);
+    self allowcrouch(true);
+    self allowprone(true);
+    self setstance("stand");
+    expected_scale = (isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 1) ? (1.0 + (0.10 * self.multi_staminup_counter)) : 1.0;
+    self setmovespeedscale(expected_scale);
 }
 
 monitor_spent_points()
@@ -5169,5 +6420,1081 @@ repairman_tear_chunk_callback(node, chunk)
                 }
             }
         }
+    }
+}
+
+// =========================================================================
+// Mystery Box, Der Wunderfizz & Pack-A-Punch Subsystems
+// Perks: No Bear Brew, Pack-A-Box, Timeslip
+// =========================================================================
+
+init_multi_perks_magicbox()
+{
+    flag_wait("start_zombie_round_logic");
+    wait 0.5;
+
+    // Set custom PaP move-in and move-out hooks for Timeslip
+    level.custom_pap_move_in = ::timeslip_pap_move_in;
+    level.custom_pap_move_out = ::timeslip_pap_move_out;
+    replacefunc(maps\mp\zombies\_zm_perks::third_person_weapon_upgrade, ::timeslip_third_person_weapon_upgrade);
+
+    // Hook mystery box joker/teddy bear chance calculation
+    if(isDefined(level._zombiemode_chest_joker_chance_override_func))
+        level.prev_multi_perks_joker_chance_func = level._zombiemode_chest_joker_chance_override_func;
+    level._zombiemode_chest_joker_chance_override_func = ::multi_perks_chest_joker_chance_override;
+
+    // Thread Wunderfizz monitor for Origins
+    level thread multi_perks_wunderfizz_monitor();
+
+    // Thread round watcher for No Bear Brew upgrade (move mystery box once per round)
+    level thread multi_perks_no_bear_round_watcher();
+
+    // Wait for chests array to exist
+    while(!isDefined(level.chests) || level.chests.size == 0)
+        wait 0.5;
+
+    for(i = 0; i < level.chests.size; i++)
+    {
+        level.chests[i] thread multi_perks_chest_monitor(i);
+    }
+}
+
+multi_perks_chest_joker_chance_override(chance)
+{
+    user = undefined;
+    if(isDefined(self.owner) && isDefined(self.owner.chest_user))
+        user = self.owner.chest_user;
+    else if(isDefined(self.chest_user))
+        user = self.chest_user;
+
+    // No Bear Brew: strictly prevent teddy bear from appearing
+    if(isDefined(user) && isPlayer(user) && is_true(user.has_no_bear_brew))
+    {
+        return -1;
+    }
+
+    if(isDefined(level.prev_multi_perks_joker_chance_func))
+        return [[ level.prev_multi_perks_joker_chance_func ]](chance);
+
+    return chance;
+}
+
+multi_perks_get_pack_a_box_weapon(weap)
+{
+    if(!isDefined(weap) || !maps\mp\zombies\_zm_weapons::can_upgrade_weapon(weap))
+        return weap;
+
+    root = tolower(weap);
+    root = maps\mp\zombies\_zm_weapons::get_base_name(root);
+
+    if(!isDefined(level.zombie_weapons[root]) || !isDefined(level.zombie_weapons[root].upgrade_name))
+        return weap;
+
+    upg_base = level.zombie_weapons[root].upgrade_name;
+
+    def_att = undefined;
+    if(isDefined(level.zombie_weapons[root].default_attachment))
+        def_att = level.zombie_weapons[root].default_attachment;
+
+    addons = level.zombie_weapons[root].addon_attachments;
+
+    valid_atts = [];
+    if(isDefined(def_att) && def_att != "" && def_att != "none")
+        valid_atts[valid_atts.size] = def_att;
+
+    // Known weapons where non-optic attachments or missing optics cause invisible sight ADS misalignment
+    problem_weapons = [];
+    problem_weapons["galil_zm"] = true;
+    problem_weapons["fal_zm"] = true;
+    problem_weapons["ak74u_zm"] = true;
+
+    if(isDefined(addons) && addons.size > 0)
+    {
+        for(i = 0; i < addons.size; i++)
+        {
+            a = addons[i];
+            if(!isDefined(a) || a == "" || a == "none")
+                continue;
+
+            // For problem weapons, only allow optic attachments (reflex, acog, targfinder, holo, etc.)
+            // Exclude iron/grip/selectfire/silencer/fmj which cause invisible sights or misaligned ADS
+            if(isDefined(problem_weapons[root]))
+            {
+                if(a == "grip" || a == "selectfire" || a == "silencer" || a == "fmj" || a == "fastreload" || a == "extclip")
+                    continue;
+            }
+
+            already_in = false;
+            for(j = 0; j < valid_atts.size; j++)
+            {
+                if(valid_atts[j] == a)
+                {
+                    already_in = true;
+                    break;
+                }
+            }
+            if(!already_in)
+                valid_atts[valid_atts.size] = a;
+        }
+    }
+
+    if(valid_atts.size > 0)
+    {
+        chosen_att = valid_atts[randomint(valid_atts.size)];
+        return upg_base + "+" + chosen_att;
+    }
+
+    return upg_base;
+}
+
+multi_perks_chest_monitor(chest_idx)
+{
+    level endon("game_ended");
+
+    while(true)
+    {
+        self waittill("trigger", user);
+
+        // Wait a frame so chest_user, weapon_out and _box_open are established by treasure_chest_think
+        wait 0.05;
+
+        // Ignore weapon grab trigger event or if box is already rolling or closing
+        if(is_true(self.timeslip_in_progress) || is_true(self.grab_weapon_hint) || !is_true(self.weapon_out))
+            continue;
+
+        if(!isDefined(user) || !isPlayer(user) || !is_true(self._box_open))
+            continue;
+
+        // Timeslip: speeds up or instantly finalizes Mystery Box randomising
+        if(is_true(user.has_timeslip))
+        {
+            is_instant = (isDefined(user.timeslip_level) && user.timeslip_level >= 2);
+            self.timeslip_in_progress = true;
+
+            if(!is_instant)
+            {
+                // Base Timeslip: short spin (~0.75s)
+                wait 0.75;
+            }
+
+            // Verify chest is still open and weapon has not been grabbed/closed in the meantime
+            if(!is_true(self._box_open) || !is_true(self.weapon_out) || is_true(self.grab_weapon_hint) || flag("moving_chest_now"))
+            {
+                self.timeslip_in_progress = undefined;
+                continue;
+            }
+
+            if(isDefined(self.zbarrier) && is_true(self._box_open) && !flag("moving_chest_now"))
+            {
+                rand = undefined;
+                if(isDefined(user.pers_upgrades_awarded) && is_true(user.pers_upgrades_awarded["box_weapon"]))
+                    rand = maps\mp\zombies\_zm_pers_upgrades_functions::pers_treasure_chest_choosespecialweapon(user);
+                else
+                    rand = maps\mp\zombies\_zm_magicbox::treasure_chest_chooseweightedrandomweapon(user);
+
+                // Pack-A-Box check (+20 percent per upgrade level up to 100 percent)
+                if(isDefined(user.pack_a_box_level) && user.pack_a_box_level > 0)
+                {
+                    pab_chance = user.pack_a_box_level * 20;
+                    if(randomint(100) < pab_chance)
+                    {
+                        if(maps\mp\zombies\_zm_weapons::can_upgrade_weapon(rand))
+                        {
+                            upg = multi_perks_get_pack_a_box_weapon(rand);
+                            if(isDefined(upg) && upg != "" && upg != rand)
+                            {
+                                rand = upg;
+                                user playsoundtoplayer("zmb_perks_packa_ready", user);
+                            }
+                        }
+                    }
+                }
+
+                self.zbarrier.weapon_string = rand;
+                self.grab_weapon_name = rand;
+
+                // Stop the vanilla 40-cycle spawn wait loop and activate grab trigger
+                self.zbarrier notify("box_hacked_respin");
+                wait 0.05;
+
+                // Delete any leftover weapon model and hide/close spin pieces
+                if(isDefined(self.zbarrier.weapon_model))
+                {
+                    self.zbarrier.weapon_model delete();
+                    self.zbarrier.weapon_model = undefined;
+                }
+                if(isDefined(self.zbarrier.weapon_model_dw))
+                {
+                    self.zbarrier.weapon_model_dw delete();
+                    self.zbarrier.weapon_model_dw = undefined;
+                }
+                self.zbarrier hidezbarrierpiece(3);
+                self.zbarrier hidezbarrierpiece(4);
+                self.zbarrier setzbarrierpiecestate(3, "closed");
+                self.zbarrier setzbarrierpiecestate(4, "closed");
+
+                v_float = (0, 0, 40);
+                if(isDefined(level.custom_magicbox_float_height))
+                    v_float = anglestoup(self.zbarrier.angles) * level.custom_magicbox_float_height;
+                else
+                    v_float = anglestoup(self.zbarrier.angles) * 40;
+
+                self.zbarrier.weapon_model = maps\mp\zombies\_zm_utility::spawn_weapon_model(rand, undefined, self.zbarrier.origin + v_float, self.zbarrier.angles + vectorscale((0, 1, 0), 180.0));
+
+                if(maps\mp\zombies\_zm_magicbox::weapon_is_dual_wield(rand))
+                {
+                    left_model = maps\mp\zombies\_zm_magicbox::get_left_hand_weapon_model_name(rand);
+                    self.zbarrier.weapon_model_dw = maps\mp\zombies\_zm_utility::spawn_weapon_model(rand, left_model, self.zbarrier.weapon_model.origin - vectorscale((1, 1, 1), 3.0), self.zbarrier.weapon_model.angles);
+                }
+
+                self.zbarrier thread multi_perks_weapon_model_cleanup(self);
+            }
+        }
+        else
+        {
+            // Player does not have Timeslip: wait for vanilla randomising loop to conclude
+            self.zbarrier waittill_any("randomization_done", "box_hacked_respin");
+
+            // Pack-A-Box check on standard roll
+            if(isDefined(user.pack_a_box_level) && user.pack_a_box_level > 0 && !flag("moving_chest_now"))
+            {
+                pab_chance = user.pack_a_box_level * 20;
+                if(randomint(100) < pab_chance)
+                {
+                    weap = self.zbarrier.weapon_string;
+                    if(isDefined(weap) && maps\mp\zombies\_zm_weapons::can_upgrade_weapon(weap))
+                    {
+                        upg = multi_perks_get_pack_a_box_weapon(weap);
+                        if(isDefined(upg) && upg != "" && upg != weap)
+                        {
+                            self.zbarrier.weapon_string = upg;
+                            self.grab_weapon_name = upg;
+                            if(isDefined(self.zbarrier.weapon_model))
+                                self.zbarrier.weapon_model setmodel(getweaponmodel(upg));
+                            user playsoundtoplayer("zmb_perks_packa_ready", user);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+multi_perks_weapon_model_cleanup(chest)
+{
+    self waittill_any("weapon_grabbed", "chest_accessed", "closed", "box_hacked_respin", "kill_chest_think");
+    if(isDefined(chest))
+    {
+        chest.timeslip_in_progress = undefined;
+    }
+    if(isDefined(self.weapon_model))
+    {
+        self.weapon_model delete();
+        self.weapon_model = undefined;
+    }
+    if(isDefined(self.weapon_model_dw))
+    {
+        self.weapon_model_dw delete();
+        self.weapon_model_dw = undefined;
+    }
+    self hidezbarrierpiece(3);
+    self hidezbarrierpiece(4);
+    self setzbarrierpiecestate(3, "closed");
+    self setzbarrierpiecestate(4, "closed");
+}
+
+multi_perks_inactive_box_watcher()
+{
+    self endon("disconnect");
+    self endon("death");
+    level endon("game_ended");
+
+    prompt_active = false;
+    prompt_target_type = undefined;
+    trigger = undefined;
+
+    while(true)
+    {
+        wait 0.2;
+
+        if(is_true(self.afterlife))
+        {
+            if(isDefined(trigger))
+            {
+                trigger delete();
+                trigger = undefined;
+                prompt_active = false;
+            }
+            continue;
+        }
+
+        if(!is_true(self.has_no_bear_brew_upgrade))
+            continue;
+
+        if(!is_true(self.can_move_box_this_round))
+            continue;
+
+        target_chest = undefined;
+        target_idx = -1;
+        target_wunderfizz = undefined;
+
+        // Check inactive Mystery Boxes
+        if(isDefined(level.chests) && level.chests.size > 1)
+        {
+            for(i = 0; i < level.chests.size; i++)
+            {
+                c = level.chests[i];
+                if(!isDefined(c) || !is_true(c.hidden))
+                    continue;
+
+                dist = 999999;
+                if(isDefined(c.origin))
+                    dist = distance(self.origin, c.origin);
+                if(isDefined(c.zbarrier) && isDefined(c.zbarrier.origin))
+                {
+                    zdist = distance(self.origin, c.zbarrier.origin);
+                    if(zdist < dist)
+                        dist = zdist;
+                }
+
+                if(dist <= 90)
+                {
+                    target_chest = c;
+                    target_idx = i;
+                    break;
+                }
+            }
+        }
+
+        // Check inactive Wunderfizz machines on Origins (zm_tomb)
+        if(!isDefined(target_chest) && getdvar("mapname") == "zm_tomb")
+        {
+            wf_machines = getentarray("random_perk_machine", "targetname");
+            if(isDefined(wf_machines))
+            {
+                for(i = 0; i < wf_machines.size; i++)
+                {
+                    m = wf_machines[i];
+                    if(!isDefined(m) || is_true(m.is_current_ball_location))
+                        continue;
+
+                    if(distance(self.origin, m.origin) <= 90)
+                    {
+                        target_wunderfizz = m;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if(isDefined(target_chest) && target_idx >= 0)
+        {
+            if(!prompt_active || prompt_target_type != "box")
+            {
+                if(isDefined(trigger))
+                    trigger delete();
+                prompt_active = true;
+                prompt_target_type = "box";
+                hint = "Hold ^3[{+activate}]^7 to Move Mystery Box Here [Once Per Round]";
+                chest_pos = target_chest.origin;
+                if(isDefined(target_chest.zbarrier) && isDefined(target_chest.zbarrier.origin))
+                    chest_pos = target_chest.zbarrier.origin;
+                trigger = self create_trigger_radius(hint, chest_pos + (0, 0, 30));
+            }
+
+            if(self useButtonPressed())
+            {
+                active_box = undefined;
+                if(isDefined(level.chest_index) && isDefined(level.chests[level.chest_index]))
+                    active_box = level.chests[level.chest_index];
+
+                box_busy = false;
+                if(isDefined(active_box))
+                {
+                    if(is_true(active_box._box_open) || is_true(active_box.weapon_out) || flag("moving_chest_now"))
+                        box_busy = true;
+                }
+                if(isDefined(level.zombie_vars["zombie_powerup_fire_sale_on"]) && level.zombie_vars["zombie_powerup_fire_sale_on"])
+                    box_busy = true;
+
+                if(box_busy)
+                {
+                    self iprintln("^1Mystery Box is currently in use!");
+                    while(self useButtonPressed())
+                        wait 0.05;
+                }
+                else
+                {
+                    self.can_move_box_this_round = false;
+                    if(isDefined(trigger))
+                    {
+                        trigger delete();
+                        trigger = undefined;
+                    }
+                    prompt_active = false;
+                    prompt_target_type = undefined;
+
+                    // Hide current active box
+                    if(isDefined(active_box))
+                    {
+                        active_box maps\mp\zombies\_zm_magicbox::hide_chest(1);
+                    }
+
+                    // Move to selected inactive location
+                    level.chest_index = target_idx;
+                    new_box = level.chests[target_idx];
+                    new_box maps\mp\zombies\_zm_magicbox::show_chest();
+
+                    if(isDefined(new_box.zbarrier) && isDefined(new_box.zbarrier.origin))
+                        playfx(level._effect["poltergeist"], new_box.zbarrier.origin);
+
+                    self playsoundtoplayer("zmb_cha_ching", self);
+
+                    while(self useButtonPressed())
+                        wait 0.05;
+                }
+            }
+        }
+        else if(isDefined(target_wunderfizz))
+        {
+            if(!prompt_active || prompt_target_type != "wunderfizz")
+            {
+                if(isDefined(trigger))
+                    trigger delete();
+                prompt_active = true;
+                prompt_target_type = "wunderfizz";
+                hint = "Hold ^3[{+activate}]^7 to Move Der Wunderfizz Here [Once Per Round]";
+                trigger = self create_trigger_radius(hint, target_wunderfizz.origin + (0, 0, 30));
+            }
+
+            if(self useButtonPressed())
+            {
+                wf_machines = getentarray("random_perk_machine", "targetname");
+                active_wf = undefined;
+                if(isDefined(wf_machines))
+                {
+                    for(m_idx = 0; m_idx < wf_machines.size; m_idx++)
+                    {
+                        if(is_true(wf_machines[m_idx].is_current_ball_location))
+                        {
+                            active_wf = wf_machines[m_idx];
+                            break;
+                        }
+                    }
+                }
+
+                wf_busy = false;
+                if(isDefined(active_wf) && isDefined(active_wf.machine_user))
+                    wf_busy = true;
+
+                if(wf_busy)
+                {
+                    self iprintln("^1Der Wunderfizz is currently in use!");
+                    while(self useButtonPressed())
+                        wait 0.05;
+                }
+                else
+                {
+                    self.can_move_box_this_round = false;
+                    if(isDefined(trigger))
+                    {
+                        trigger delete();
+                        trigger = undefined;
+                    }
+                    prompt_active = false;
+                    prompt_target_type = undefined;
+
+                    // Deactivate current Wunderfizz
+                    if(isDefined(active_wf))
+                    {
+                        active_wf.is_current_ball_location = 0;
+                        active_wf setclientfield("turn_on_location_indicator", 0);
+                        active_wf setclientfield("turn_active_perk_light_red", 1);
+                        active_wf setclientfield("turn_active_perk_light_green", 0);
+                        active_wf setclientfield("turn_active_perk_ball_light", 0);
+                        active_wf hidepart("j_ball");
+                    }
+
+                    // Activate target Wunderfizz
+                    level notify("machine_think");
+                    level.random_perk_start_machine = target_wunderfizz;
+                    target_wunderfizz thread custom_wunderfizz_machine_think();
+
+                    playfx(level._effect["poltergeist"], target_wunderfizz.origin);
+                    self playsoundtoplayer("zmb_cha_ching", self);
+
+                    while(self useButtonPressed())
+                        wait 0.05;
+                }
+            }
+        }
+        else
+        {
+            if(prompt_active)
+            {
+                if(isDefined(trigger))
+                {
+                    trigger delete();
+                    trigger = undefined;
+                }
+                prompt_active = false;
+                prompt_target_type = undefined;
+            }
+        }
+    }
+}
+
+multi_perks_no_bear_round_watcher()
+{
+    level endon("game_ended");
+    while(true)
+    {
+        level waittill_any("between_round_over", "start_of_round");
+        players = get_players();
+        if(isDefined(players))
+        {
+            for(i = 0; i < players.size; i++)
+            {
+                if(is_true(players[i].has_no_bear_brew_upgrade))
+                    players[i].can_move_box_this_round = true;
+            }
+        }
+    }
+}
+
+multi_perks_wunderfizz_monitor()
+{
+    level endon("game_ended");
+    if(getdvar("mapname") != "zm_tomb")
+        return;
+
+    while(true)
+    {
+        machines = getentarray("random_perk_machine", "targetname");
+        if(isDefined(machines))
+        {
+            players = get_players();
+            for(i = 0; i < machines.size; i++)
+            {
+                m = machines[i];
+                if(!isDefined(m.num_time_used) || !isDefined(m.num_til_moved))
+                    continue;
+
+                no_bear_active = false;
+                if(isDefined(m.machine_user) && isPlayer(m.machine_user) && is_true(m.machine_user.has_no_bear_brew))
+                    no_bear_active = true;
+
+                if(!no_bear_active && isDefined(players))
+                {
+                    for(p = 0; p < players.size; p++)
+                    {
+                        if(is_true(players[p].has_no_bear_brew) && distance(players[p].origin, m.origin) <= 120)
+                        {
+                            no_bear_active = true;
+                            break;
+                        }
+                    }
+                }
+
+                if(no_bear_active && m.num_time_used >= m.num_til_moved)
+                {
+                    m.num_til_moved = m.num_time_used + randomintrange(3, 7);
+                }
+            }
+        }
+        wait 0.2;
+    }
+}
+
+timeslip_pap_move_in(trigger, origin_offset, angles_offset, perk_machine)
+{
+    level endon("Pack_A_Punch_off");
+    trigger endon("pap_player_disconnected");
+
+    rot_time = 0.35;
+    wait_time = 0.5;
+    move_time = 0.5;
+
+    if(isDefined(trigger.pack_player) && is_true(trigger.pack_player.has_timeslip))
+    {
+        rot_time = 0.1;
+        wait_time = 0.1;
+        move_time = 0.15;
+    }
+
+    trigger.worldgun rotateto(self.angles + angles_offset + vectorscale((0, 1, 0), 90.0), rot_time, 0, 0);
+    offsetdw = vectorscale((1, 1, 1), 3.0);
+
+    if(isDefined(trigger.worldgun.worldgundw))
+        trigger.worldgun.worldgundw rotateto(self.angles + angles_offset + vectorscale((0, 1, 0), 90.0), rot_time, 0, 0);
+
+    wait(wait_time);
+    trigger.worldgun moveto(self.origin + origin_offset, move_time, 0, 0);
+
+    if(isDefined(trigger.worldgun.worldgundw))
+        trigger.worldgun.worldgundw moveto(self.origin + origin_offset + offsetdw, move_time, 0, 0);
+}
+
+timeslip_pap_move_out(trigger, origin_offset, interact_offset)
+{
+    level endon("Pack_A_Punch_off");
+    trigger endon("pap_player_disconnected");
+    offsetdw = vectorscale((1, 1, 1), 3.0);
+
+    if(!isDefined(trigger.worldgun))
+        return;
+
+    move_out_time = 0.5;
+    wait_time = 0.5;
+
+    if(isDefined(trigger.pack_player) && is_true(trigger.pack_player.has_timeslip))
+    {
+        move_out_time = 0.15;
+        wait_time = 0.15;
+    }
+
+    trigger.worldgun moveto(self.origin + interact_offset, move_out_time, 0, 0);
+
+    if(isDefined(trigger.worldgun.worldgundw))
+        trigger.worldgun.worldgundw moveto(self.origin + interact_offset + offsetdw, move_out_time, 0, 0);
+
+    wait(wait_time);
+
+    if(!isDefined(trigger.worldgun))
+        return;
+
+    trigger.worldgun moveto(self.origin + origin_offset, level.packapunch_timeout, 0, 0);
+
+    if(isDefined(trigger.worldgun.worldgundw))
+        trigger.worldgun.worldgundw moveto(self.origin + origin_offset + offsetdw, level.packapunch_timeout, 0, 0);
+}
+
+timeslip_third_person_weapon_upgrade( current_weapon, upgrade_weapon, packa_rollers, perk_machine, trigger )
+{
+    level endon( "Pack_A_Punch_off" );
+    trigger endon( "pap_player_disconnected" );
+    rel_entity = trigger.perk_machine;
+    origin_offset = ( 0, 0, 0 );
+    angles_offset = ( 0, 0, 0 );
+    origin_base = self.origin;
+    angles_base = self.angles;
+
+    if ( isdefined( rel_entity ) )
+    {
+        if ( isdefined( level.pap_interaction_height ) )
+            origin_offset = ( 0, 0, level.pap_interaction_height );
+        else
+            origin_offset = vectorscale( ( 0, 0, 1 ), 35.0 );
+
+        angles_offset = vectorscale( ( 0, 1, 0 ), 90.0 );
+        origin_base = rel_entity.origin;
+        angles_base = rel_entity.angles;
+    }
+    else
+        rel_entity = self;
+
+    forward = anglestoforward( angles_base + angles_offset );
+    interact_offset = origin_offset + forward * -25;
+
+    if ( !isdefined( perk_machine.fx_ent ) )
+    {
+        perk_machine.fx_ent = spawn( "script_model", origin_base + origin_offset + ( 0, 1, -34 ) );
+        perk_machine.fx_ent.angles = angles_base + angles_offset;
+        perk_machine.fx_ent setmodel( "tag_origin" );
+        perk_machine.fx_ent linkto( perk_machine );
+    }
+
+    if ( isdefined( level._effect["packapunch_fx"] ) )
+        fx = playfxontag( level._effect["packapunch_fx"], perk_machine.fx_ent, "tag_origin" );
+
+    offsetdw = vectorscale( ( 1, 1, 1 ), 3.0 );
+    weoptions = self maps\mp\zombies\_zm_weapons::get_pack_a_punch_weapon_options( current_weapon );
+    trigger.worldgun = maps\mp\zombies\_zm_utility::spawn_weapon_model( current_weapon, undefined, origin_base + interact_offset, self.angles, weoptions );
+    worldgundw = undefined;
+
+    if ( maps\mp\zombies\_zm_magicbox::weapon_is_dual_wield( current_weapon ) )
+        worldgundw = maps\mp\zombies\_zm_utility::spawn_weapon_model( current_weapon, maps\mp\zombies\_zm_magicbox::get_left_hand_weapon_model_name( current_weapon ), origin_base + interact_offset + offsetdw, self.angles, weoptions );
+
+    trigger.worldgun.worldgundw = worldgundw;
+
+    if ( isdefined( level.custom_pap_move_in ) )
+        perk_machine [[ level.custom_pap_move_in ]]( trigger, origin_offset, angles_offset, perk_machine );
+    else
+        perk_machine maps\mp\zombies\_zm_perks::pap_weapon_move_in( trigger, origin_offset, angles_offset );
+
+    self playsound( "zmb_perks_packa_upgrade" );
+
+    if ( isdefined( perk_machine.wait_flag ) )
+        perk_machine.wait_flag rotateto( perk_machine.wait_flag.angles + vectorscale( ( 1, 0, 0 ), 179.0 ), 0.25, 0, 0 );
+
+    pre_wait = 0.35;
+    pap_wait = 3.0;
+    player_to_check = undefined;
+    if(isDefined(trigger.pack_player))
+        player_to_check = trigger.pack_player;
+    else if(isPlayer(self))
+        player_to_check = self;
+
+    if(isDefined(player_to_check) && is_true(player_to_check.has_timeslip))
+    {
+        is_instant = (isDefined(player_to_check.timeslip_level) && player_to_check.timeslip_level >= 2);
+        pre_wait = is_instant ? 0.05 : 0.15;
+        pap_wait = is_instant ? 0.2 : 0.75;
+    }
+
+    wait pre_wait;
+    trigger.worldgun delete();
+
+    if ( isdefined( worldgundw ) )
+        worldgundw delete();
+
+    wait pap_wait;
+
+    if ( isdefined( self ) )
+        self playsound( "zmb_perks_packa_ready" );
+    else
+        return undefined;
+
+    upoptions = self maps\mp\zombies\_zm_weapons::get_pack_a_punch_weapon_options( upgrade_weapon );
+    trigger.current_weapon = current_weapon;
+    trigger.upgrade_name = upgrade_weapon;
+    trigger.worldgun = maps\mp\zombies\_zm_utility::spawn_weapon_model( upgrade_weapon, undefined, origin_base + origin_offset, angles_base + angles_offset + vectorscale( ( 0, 1, 0 ), 90.0 ), upoptions );
+    worldgundw = undefined;
+
+    if ( maps\mp\zombies\_zm_magicbox::weapon_is_dual_wield( upgrade_weapon ) )
+        worldgundw = maps\mp\zombies\_zm_utility::spawn_weapon_model( upgrade_weapon, maps\mp\zombies\_zm_magicbox::get_left_hand_weapon_model_name( upgrade_weapon ), origin_base + origin_offset + offsetdw, angles_base + angles_offset + vectorscale( ( 0, 1, 0 ), 90.0 ), upoptions );
+
+    trigger.worldgun.worldgundw = worldgundw;
+
+    if ( isdefined( perk_machine.wait_flag ) )
+        perk_machine.wait_flag rotateto( perk_machine.wait_flag.angles - vectorscale( ( 1, 0, 0 ), 179.0 ), 0.25, 0, 0 );
+
+    if ( isdefined( level.custom_pap_move_out ) )
+        rel_entity thread [[ level.custom_pap_move_out ]]( trigger, origin_offset, interact_offset );
+    else
+        rel_entity thread maps\mp\zombies\_zm_perks::pap_weapon_move_out( trigger, origin_offset, interact_offset );
+
+    return trigger.worldgun;
+}
+
+init_custom_wunderfizz()
+{
+    level endon("game_ended");
+    while(!isDefined(level.random_perk_start_machine))
+        wait 0.5;
+
+    // Small delay to ensure initial machine setup is complete
+    wait 1.0;
+    level notify("machine_think");
+    level.random_perk_start_machine thread custom_wunderfizz_machine_think();
+}
+
+custom_wunderfizz_unitrigger_think( player )
+{
+    self endon( "kill_trigger" );
+
+    while ( true )
+    {
+        self waittill( "trigger", player );
+        self.stub.trigger_target notify( "trigger", player );
+    }
+}
+
+custom_wunderfizz_bottle_motion()
+{
+    putouttime = 3;
+    putbacktime = 10;
+    v_float = anglestoforward(self.angles - (0, 90, 0)) * 10;
+    if(!isDefined(self.bottle_spawn_location))
+        return;
+
+    self.bottle_spawn_location.origin = self.origin + (0, 0, 53);
+    self.bottle_spawn_location.angles = self.angles;
+    self.bottle_spawn_location.origin = self.bottle_spawn_location.origin - v_float;
+    self.bottle_spawn_location moveto(self.bottle_spawn_location.origin + v_float, putouttime, putouttime * 0.5);
+    self.bottle_spawn_location.angles = self.bottle_spawn_location.angles + (0, 0, 10);
+    self.bottle_spawn_location rotateyaw(720, putouttime, putouttime * 0.5);
+    self waittill("done_cycling");
+    self.bottle_spawn_location.angles = self.angles;
+    self.bottle_spawn_location moveto(self.bottle_spawn_location.origin - v_float, putbacktime, putbacktime * 0.5);
+    self.bottle_spawn_location rotateyaw(90, putbacktime, putbacktime * 0.5);
+}
+
+custom_wunderfizz_bottle_cycling()
+{
+    self endon("done_cycling");
+    if(!isDefined(level.perk_bottle_weapon_array) || !isDefined(self.bottle_spawn_location))
+        return;
+
+    array_key = getarraykeys(level.perk_bottle_weapon_array);
+    while(true)
+    {
+        for(i = 0; i < array_key.size; i++)
+        {
+            if(isDefined(level.perk_bottle_weapon_array[array_key[i]].weapon))
+                model = getweaponmodel(level.perk_bottle_weapon_array[array_key[i]].weapon);
+            else
+                model = getweaponmodel(level.perk_bottle_weapon_array[array_key[i]].perk_bottle);
+
+            self.bottle_spawn_location setmodel(model);
+            wait 0.2;
+        }
+    }
+}
+
+custom_wunderfizz_get_random_perk(player)
+{
+    if(isDefined(level._random_perk_machine_perk_list) && level._random_perk_machine_perk_list.size > 0)
+    {
+        keys = array_randomize(getarraykeys(level._random_perk_machine_perk_list));
+        for(i = 0; i < keys.size; i++)
+        {
+            p = level._random_perk_machine_perk_list[keys[i]];
+            if(!player hasPerk(p))
+                return p;
+        }
+        return level._random_perk_machine_perk_list[keys[0]];
+    }
+    return "specialty_armorvest";
+}
+
+custom_wunderfizz_get_perk_model(perk)
+{
+    if(isDefined(level.machine_assets))
+    {
+        switch(perk)
+        {
+            case "specialty_armorvest": if(isDefined(level.machine_assets["juggernog"])) return getweaponmodel(level.machine_assets["juggernog"].weapon); break;
+            case "specialty_quickrevive": if(isDefined(level.machine_assets["revive"])) return getweaponmodel(level.machine_assets["revive"].weapon); break;
+            case "specialty_fastreload": if(isDefined(level.machine_assets["speedcola"])) return getweaponmodel(level.machine_assets["speedcola"].weapon); break;
+            case "specialty_rof": if(isDefined(level.machine_assets["doubletap"])) return getweaponmodel(level.machine_assets["doubletap"].weapon); break;
+            case "specialty_longersprint": if(isDefined(level.machine_assets["marathon"])) return getweaponmodel(level.machine_assets["marathon"].weapon); break;
+            case "specialty_flakjacket": if(isDefined(level.machine_assets["divetonuke"])) return getweaponmodel(level.machine_assets["divetonuke"].weapon); break;
+            case "specialty_deadshot": if(isDefined(level.machine_assets["deadshot"])) return getweaponmodel(level.machine_assets["deadshot"].weapon); break;
+            case "specialty_additionalprimaryweapon": if(isDefined(level.machine_assets["additionalprimaryweapon"])) return getweaponmodel(level.machine_assets["additionalprimaryweapon"].weapon); break;
+            case "specialty_scavenger": if(isDefined(level.machine_assets["tombstone"])) return getweaponmodel(level.machine_assets["tombstone"].weapon); break;
+            case "specialty_finalstand": if(isDefined(level.machine_assets["whoswho"])) return getweaponmodel(level.machine_assets["whoswho"].weapon); break;
+        }
+    }
+    return getweaponmodel("zombie_perk_bottle_jugg");
+}
+
+custom_wunderfizz_grab_check(player, random_perk)
+{
+    self endon("time_out_check");
+    perk_is_bought = 0;
+
+    while(!perk_is_bought)
+    {
+        self waittill("trigger", e_triggerer);
+
+        if(e_triggerer == player)
+        {
+            if(isDefined(player.is_drinking) && player.is_drinking > 0)
+            {
+                wait 0.1;
+                continue;
+            }
+
+            if(player.num_perks < player get_player_perk_purchase_limit())
+                perk_is_bought = 1;
+            else
+            {
+                self playsound("evt_perk_deny");
+                player maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "sigh");
+                self notify("time_out_or_perk_grab");
+                flag_set("machine_can_reset");
+                return;
+            }
+        }
+    }
+
+    player maps\mp\zombies\_zm_stats::increment_client_stat("grabbed_from_perk_random");
+    player maps\mp\zombies\_zm_stats::increment_player_stat("grabbed_from_perk_random");
+    self notify("grab_check");
+    self notify("time_out_or_perk_grab");
+    gun = player maps\mp\zombies\_zm_perks::perk_give_bottle_begin(random_perk);
+    evt = player waittill_any_return("fake_death", "death", "player_downed", "weapon_change_complete");
+
+    if(evt == "weapon_change_complete")
+        player thread maps\mp\zombies\_zm_perks::wait_give_perk(random_perk, 1);
+
+    player maps\mp\zombies\_zm_perks::perk_give_bottle_end(gun, random_perk);
+    flag_set("machine_can_reset");
+}
+
+custom_wunderfizz_time_out_check()
+{
+    self endon("grab_check");
+    wait 10.0;
+    self notify("time_out_check");
+    flag_set("machine_can_reset");
+}
+
+custom_wunderfizz_relocate()
+{
+    machines = getentarray("random_perk_machine", "targetname");
+    if(!isDefined(machines) || machines.size <= 1)
+        return;
+
+    do
+        new_machine = machines[randomint(machines.size)];
+    while(new_machine == level.random_perk_start_machine);
+
+    level.random_perk_start_machine = new_machine;
+    wait 10;
+    new_machine thread custom_wunderfizz_machine_think();
+}
+
+custom_wunderfizz_machine_think()
+{
+    level notify("machine_think");
+    level endon("machine_think");
+
+    self show();
+    self.num_time_used = 0;
+    self.num_til_moved = randomintrange(4, 7);
+    self.is_current_ball_location = 1;
+    self setclientfield("turn_on_location_indicator", 1);
+    self showpart("j_ball");
+    self setclientfield("turn_active_perk_light_red", 0);
+    self setclientfield("turn_active_perk_light_green", 1);
+    self setclientfield("turn_active_perk_ball_light", 1);
+    self setclientfield("zone_captured", 1);
+
+    while(isDefined(self.is_locked) && self.is_locked)
+        wait 1;
+
+    while(true)
+    {
+        self waittill("trigger", player);
+        flag_clear("machine_can_reset");
+        level notify("pmmove");
+
+        cost = 1500;
+        if(isDefined(level._random_zombie_perk_cost))
+            cost = level._random_zombie_perk_cost;
+
+        if(player.score < cost)
+        {
+            self playsound("evt_perk_deny");
+            player maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
+            continue;
+        }
+
+        // No Bear Brew: prevent moving / bear bottle
+        if(is_true(player.has_no_bear_brew) && self.num_time_used >= self.num_til_moved)
+        {
+            self.num_til_moved = self.num_time_used + randomintrange(3, 7);
+        }
+
+        if(self.num_time_used >= self.num_til_moved)
+        {
+            level notify("pmmove");
+            self setclientfield("turn_on_location_indicator", 0);
+            self.is_current_ball_location = 0;
+            self setclientfield("turn_active_perk_light_red", 1);
+            self setclientfield("turn_active_perk_light_green", 0);
+            self setclientfield("turn_active_perk_ball_light", 0);
+            self hidepart("j_ball");
+            self playsound("zmb_rand_perk_leave");
+            self thread custom_wunderfizz_relocate();
+            break;
+        }
+
+        self.machine_user = player;
+        self.num_time_used++;
+        player maps\mp\zombies\_zm_stats::increment_client_stat("use_perk_random");
+        player maps\mp\zombies\_zm_stats::increment_player_stat("use_perk_random");
+        player maps\mp\zombies\_zm_score::minus_to_player_score(cost);
+
+        if(isDefined(level.perk_random_vo_func_usemachine) && isDefined(player))
+            player thread [[ level.perk_random_vo_func_usemachine ]]();
+
+        while(true)
+        {
+            thread maps\mp\zombies\_zm_unitrigger::unregister_unitrigger(self.unitrigger_stub);
+            random_perk = custom_wunderfizz_get_random_perk(player);
+            self setclientfield("perk_bottle_cycle_state", 1);
+            level notify("pmstrt");
+            self playsound("zmb_rand_perk_start");
+            self playloopsound("zmb_rand_perk_loop", 0.5);
+
+            // Timeslip speedup on Der Wunderfizz
+            cycle_wait_before = 1.0;
+            cycle_time = 3.0;
+            if(is_true(player.has_timeslip))
+            {
+                is_instant = (isDefined(player.timeslip_level) && player.timeslip_level >= 2);
+                cycle_wait_before = is_instant ? 0.05 : 0.25;
+                cycle_time = is_instant ? 0.2 : 0.8;
+            }
+
+            wait cycle_wait_before;
+            self thread custom_wunderfizz_bottle_cycling();
+            self thread custom_wunderfizz_bottle_motion();
+            model = custom_wunderfizz_get_perk_model(random_perk);
+            wait cycle_time;
+            self notify("done_cycling");
+            self stoploopsound(1);
+            self playsound("zmb_rand_perk_stop");
+
+            // No Bear Brew: prevent bear bottle
+            if(is_true(player.has_no_bear_brew) && self.num_time_used >= self.num_til_moved)
+            {
+                self.num_til_moved = self.num_time_used + randomintrange(3, 7);
+            }
+
+            if(self.num_time_used >= self.num_til_moved)
+            {
+                if(isDefined(self.bottle_spawn_location))
+                    self.bottle_spawn_location setmodel("t6_wpn_zmb_perk_bottle_bear_world");
+                level notify("pmmove");
+                wait 3;
+                player maps\mp\zombies\_zm_score::add_to_player_score(cost);
+                if(isDefined(self.bottle_spawn_location))
+                    self.bottle_spawn_location setmodel("tag_origin");
+                self setclientfield("perk_bottle_cycle_state", 0);
+                self setclientfield("turn_on_location_indicator", 0);
+                self.is_current_ball_location = 0;
+                self setclientfield("turn_active_perk_light_red", 1);
+                self setclientfield("turn_active_perk_light_green", 0);
+                self setclientfield("turn_active_perk_ball_light", 0);
+                self hidepart("j_ball");
+                self.machine_user = undefined;
+                thread maps\mp\zombies\_zm_unitrigger::register_static_unitrigger(self.unitrigger_stub, ::custom_wunderfizz_unitrigger_think);
+                self playsound("zmb_rand_perk_leave");
+                self thread custom_wunderfizz_relocate();
+                break;
+            }
+            else
+            {
+                if(isDefined(self.bottle_spawn_location))
+                    self.bottle_spawn_location setmodel(model);
+            }
+
+            self.grab_perk_hint = 1;
+            thread maps\mp\zombies\_zm_unitrigger::register_static_unitrigger(self.unitrigger_stub, ::custom_wunderfizz_unitrigger_think);
+            self thread custom_wunderfizz_grab_check(player, random_perk);
+            self thread custom_wunderfizz_time_out_check();
+            self waittill_either("grab_check", "time_out_check");
+            self.grab_perk_hint = 0;
+            thread maps\mp\zombies\_zm_unitrigger::unregister_unitrigger(self.unitrigger_stub);
+            thread maps\mp\zombies\_zm_unitrigger::register_static_unitrigger(self.unitrigger_stub, ::custom_wunderfizz_unitrigger_think);
+            level notify("pmstop");
+
+            if(player.num_perks >= player get_player_perk_purchase_limit())
+                player maps\mp\zombies\_zm_score::add_to_player_score(cost);
+
+            self setclientfield("perk_bottle_cycle_state", 0);
+            self.machine_user = undefined;
+            if(isDefined(self.bottle_spawn_location))
+                self.bottle_spawn_location setmodel("tag_origin");
+
+            flag_set("machine_can_reset");
+            break;
+        }
+
+        flag_wait("machine_can_reset");
     }
 }
