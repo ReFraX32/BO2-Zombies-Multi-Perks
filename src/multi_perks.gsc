@@ -239,8 +239,12 @@ motd_afterlife_perk_preservation_watcher()
             saved_no_bear = is_true(self.has_no_bear_brew);
             saved_no_bear_upg = is_true(self.has_no_bear_brew_upgrade);
             saved_pack_a_box = isDefined(self.pack_a_box_level) ? self.pack_a_box_level : 0;
-            saved_timeslip = isDefined(self.timeslip_level) ? self.timeslip_level : 0;
+            saved_repairman_lvl = isDefined(self.repairman_level) ? self.repairman_level : 0;
             saved_qr = is_true(self.had_quickrevive) || self hasPerk("specialty_quickrevive") || saved_muscle_milk || saved_whos_who || saved_fighters_fizz;
+
+            saved_timeslip = isDefined(self.timeslip_level) ? self.timeslip_level : 0;
+            saved_guardian_lvl = isDefined(self.guardian_angel_level) ? self.guardian_angel_level : 0;
+            saved_jugger = is_true(self.had_juggernog) || self hasPerk("specialty_armorvest") || (saved_timeslip > 0) || (saved_guardian_lvl > 0);
 
             saved_multi_staminup = isDefined(self.multi_staminup_counter) ? self.multi_staminup_counter : 0;
             saved_exo = is_true(self.has_jetpack);
@@ -248,6 +252,9 @@ motd_afterlife_perk_preservation_watcher()
             saved_bandolier_stash = isDefined(self.bandolier_stash) ? self.bandolier_stash : [];
             saved_blood = is_true(self.has_blood_bullets);
             saved_nitrogen = is_true(self.has_nitrogen_cooled);
+            saved_cashback_lvl = isDefined(self.cashback_level) ? self.cashback_level : 0;
+            saved_tactiquilla_lvl = isDefined(self.tactiquilla_level) ? self.tactiquilla_level : 0;
+            saved_speedcola = is_true(self.had_speedcola) || self hasPerk("specialty_fastreload") || (saved_cashback_lvl > 0) || (saved_tactiquilla_lvl > 0);
 
             while(is_true(self.afterlife) || isDefined(self.e_afterlife_corpse) || is_true(self.keep_perks))
                 wait 0.1;
@@ -292,12 +299,28 @@ motd_afterlife_perk_preservation_watcher()
                     self.has_pack_a_box = true;
                     self.pack_a_box_level = saved_pack_a_box;
                 }
+                if(saved_repairman_lvl > 0)
+                {
+                    self.has_repairman = true;
+                    self.repairman_level = saved_repairman_lvl;
+                    self.repairman_price = 2000 * (self.repairman_level + 1);
+                }
+                self.had_quickrevive = true;
+            }
+
+            if(saved_jugger && self hasPerk("specialty_armorvest"))
+            {
                 if(saved_timeslip > 0)
                 {
                     self.has_timeslip = true;
                     self.timeslip_level = saved_timeslip;
                 }
-                self.had_quickrevive = true;
+                if(saved_guardian_lvl > 0)
+                {
+                    self.has_guardian_angel = true;
+                    self.guardian_angel_level = saved_guardian_lvl;
+                }
+                self.had_juggernog = true;
             }
 
             if(self hasPerk("specialty_longersprint"))
@@ -324,6 +347,23 @@ motd_afterlife_perk_preservation_watcher()
                 }
                 self.had_staminup = true;
             }
+
+            if(self hasPerk("specialty_fastreload"))
+            {
+                if(saved_cashback_lvl > 0)
+                {
+                    self.has_cashback = true;
+                    self.cashback_level = saved_cashback_lvl;
+                }
+                if(saved_tactiquilla_lvl > 0)
+                {
+                    self.has_tactiquilla = true;
+                    self.tactiquilla_level = saved_tactiquilla_lvl;
+                    self thread tactiquilla_sprint_fire_think();
+                    self thread tactiquilla_ammo_refund_think();
+                }
+                self.had_speedcola = true;
+            }
         }
         else
         {
@@ -346,9 +386,10 @@ motd_afterlife_perk_preservation_watcher()
             self.has_pack_a_box = false;
             self.pack_a_box_level = 0;
             self.can_buy_pack_a_box = false;
-            self.has_timeslip = false;
-            self.timeslip_level = 0;
-            self.can_buy_timeslip = false;
+            self.has_repairman = false;
+            self.repairman_level = 0;
+            self.repairman_price = 2000;
+            self.can_buy_repairman = false;
             self.muscle_milk_cooldown = false;
             self notify("muscle_milk_restart");
 
@@ -374,6 +415,9 @@ motd_afterlife_perk_preservation_watcher()
             self notify("stop_blood_bullets");
             self notify("stop_nitrogen_cooled");
             self setmovespeedscale(1.0);
+            self unsetperk("specialty_unlimitedsprint");
+            self setclientdvar("player_sprintTime", "4.0");
+            self setclientdvar("player_sprintUnlimited", "0");
 
             self.had_mule_kick = false;
             self.multi_mule_kick_counter = 1;
@@ -400,6 +444,20 @@ motd_afterlife_perk_preservation_watcher()
             self.has_vigor_rush = false;
             self.can_buy_vigor_rush = false;
             self notify("stop_vigor_rush");
+            self.has_timeslip = false;
+            self.timeslip_level = 0;
+            self.timeslip_price = 2500;
+            self.timeslip_upgrade_price = 2500;
+            self.can_buy_timeslip = false;
+            self.has_guardian_angel = false;
+            self.guardian_angel_level = 0;
+            self.guardian_angel_price = 4000;
+            self.guardian_angel_upgrade_price = 2000;
+            self.can_buy_guardian_angel = false;
+            self.guardian_angel_active = false;
+            self.guardian_angel_charging = false;
+            self.guardian_angel_kills = 0;
+            self.guardian_angel_buffer_active = false;
 
             self.had_speedcola = false;
             self.multi_speedcola_counter = 0;
@@ -409,8 +467,14 @@ motd_afterlife_perk_preservation_watcher()
             self.has_cashback = false;
             self.cashback_level = 0;
             self.can_buy_cashback = false;
-            self.has_repairman = false;
-            self.can_buy_repairman = false;
+            self.has_tactiquilla = false;
+            self.tactiquilla_level = 0;
+            self.tactiquilla_price = 2000;
+            self.tactiquilla_upgrade_price = 1500;
+            self.can_buy_tactiquilla = false;
+            self.tactiquilla_active_speed_scale = undefined;
+            self tactiquilla_restore_reload_sprint();
+            self unsetperk("specialty_sprintrecovery");
             self setclientdvar("perk_weapReloadMultiplier", "" + level.default_weap_reload_mult);
 
             self.had_doubletap = false;
@@ -435,8 +499,19 @@ create_trigger_radius(hint_text, origin)
     trigger sethintstring(hint_text);
     trigger setinvisibletoall();
     if(isPlayer(self))
+    {
         trigger setvisibletoplayer(self);
+        trigger thread trigger_auto_cleanup(self);
+    }
     return trigger;
+}
+
+trigger_auto_cleanup(player)
+{
+    self endon("death");
+    player waittill_any("death", "disconnect", "perk_acquired");
+    if(isDefined(self))
+        self delete();
 }
 
 onPlayerConnect()
@@ -564,10 +639,19 @@ reset_perk_values()
     self.cashback_price = 3000;
     self.can_buy_cashback = false;
 
+    self.has_tactiquilla = false;
+    self.tactiquilla_level = 0;
+    self.tactiquilla_price = 2000;
+    self.tactiquilla_upgrade_price = 1500;
+    self.can_buy_tactiquilla = true;
+    self.tactiquilla_multikill_count = 0;
+    self.tactiquilla_is_reloading = false;
+    self.tactiquilla_sprint_blocked_for_reload = false;
+
     self.has_repairman = false;
     self.repairman_level = 0;
     self.repairman_price = 2000;
-    self.can_buy_repairman = false;
+    self.can_buy_repairman = true;
 
     self.has_muscle_milk = false;
     self.muscle_milk_price = 3000;
@@ -601,9 +685,21 @@ reset_perk_values()
 
     self.has_timeslip = false;
     self.timeslip_level = 0;
-    self.timeslip_price = 2000;
-    self.timeslip_upgrade_price = 1500;
-    self.can_buy_timeslip = true;
+    self.timeslip_price = 2500;
+    self.timeslip_upgrade_price = 2500;
+    self.can_buy_timeslip = false;
+
+    self.has_guardian_angel = false;
+    self.guardian_angel_level = 0;
+    self.guardian_angel_price = 4000;
+    self.guardian_angel_upgrade_price = 2000;
+    self.can_buy_guardian_angel = false;
+    self.guardian_angel_active = false;
+    self.guardian_angel_charging = false;
+    self.guardian_angel_kills = 25;
+    self.guardian_angel_kills_needed = 25;
+    self.guardian_angel_buffer_active = false;
+    self.last_guardian_buffer_time = 0;
 
     self.hasPunchColaOnce = false;
     self.multi_punchcola_counter = 1;
@@ -938,7 +1034,7 @@ check_proximity_to_machines()
         
         if(self hasPerk("specialty_quickrevive") && !self.is_purchasing)
         {
-            all_qr_bought = self.has_muscle_milk && self.has_whos_who && self.has_fighters_fizz && (self.has_no_bear_brew && self.has_no_bear_brew_upgrade) && (self.pack_a_box_level >= 5) && (self.timeslip_level >= 2);
+            all_qr_bought = self.has_muscle_milk && self.has_whos_who && self.has_fighters_fizz && (self.has_no_bear_brew && self.has_no_bear_brew_upgrade) && (self.pack_a_box_level >= 5) && !self.can_buy_repairman;
             self check_perk_proximity("quickrevive", self get_player_perk_machine_location("quickrevive"), self.last_quickrevive_purchase_time, all_qr_bought);
         }
         else if(getdvar("mapname") == "zm_prison" && !self hasPerk("specialty_quickrevive") && !self.is_purchasing)
@@ -1147,6 +1243,15 @@ get_jugg_hint_string(is_aiming)
                 hint += " ^1|^7 ";
             hint += "Press ^3[{+melee}]^7 for Dam-A-Nade [Cost: " + self.dam_a_nade_price + "]";
         }
+        if(self.can_buy_guardian_angel && (!self.has_guardian_angel || self.guardian_angel_level == 1))
+        {
+            if(hint != "")
+                hint += " ^1|^7 ";
+            if(!self.has_guardian_angel)
+                hint += "Press ^3[{+breath_sprint}]^7 for Guardian Angel Ale [Cost: " + self.guardian_angel_price + "]";
+            else
+                hint += "Press ^3[{+breath_sprint}]^7 for Upgrade Guardian Angel Ale [Cost: " + self.guardian_angel_upgrade_price + "]";
+        }
     }
     else
     {
@@ -1158,9 +1263,22 @@ get_jugg_hint_string(is_aiming)
                 hint += " ^1|^7 ";
             hint += "Press ^3[{+melee}]^7 for Vulture Aid [Cost: " + self.vulture_price + "]";
         }
-        if(hint != "")
-            hint += " ^1|^7 ";
-        hint += "Aim ^3[{+speed_throw}]^7 for More";
+        if(self.can_buy_timeslip && (!self.has_timeslip || self.timeslip_level == 1))
+        {
+            if(hint != "")
+                hint += " ^1|^7 ";
+            if(!self.has_timeslip)
+                hint += "Press ^3[{+breath_sprint}]^7 for Timeslip [Cost: " + self.timeslip_price + "]";
+            else
+                hint += "Press ^3[{+breath_sprint}]^7 for Upgrade Timeslip [Cost: " + self.timeslip_upgrade_price + "]";
+        }
+        page2_avail = self.can_buy_ethereal_razor || self.can_buy_dam_a_nade || (self.can_buy_guardian_angel && (!self.has_guardian_angel || self.guardian_angel_level == 1));
+        if(page2_avail)
+        {
+            if(hint != "")
+                hint += " ^1|^7 ";
+            hint += "Aim ^3[{+speed_throw}]^7 for More";
+        }
     }
     return hint;
 }
@@ -1171,7 +1289,13 @@ show_multi_juggernog_prompt()
     self endon("death");
     if(!self hasPerk("specialty_armorvest") || self.is_purchasing)
         return;
-    if(!self.can_buy_multi_jugger && (self.has_vulture || !self.can_buy_vulture) && !self.can_buy_ethereal_razor && !self.can_buy_dam_a_nade)
+    all_jugg_bought = !self.can_buy_multi_jugger
+        && (self.has_vulture || !self.can_buy_vulture)
+        && !self.can_buy_ethereal_razor
+        && !self.can_buy_dam_a_nade
+        && (self.has_timeslip && self.timeslip_level >= 2)
+        && (self.has_guardian_angel && self.guardian_angel_level >= 2);
+    if(all_jugg_bought)
         return;
     if(isDefined(self.current_jugger_trigger))
         return;
@@ -1232,14 +1356,42 @@ show_jugg_prompt_core(trigger_var)
                         break;
                     }
                 }
+                else if(self.can_buy_guardian_angel && !self.has_guardian_angel && self sprintButtonPressed() && self.score >= self.guardian_angel_price)
+                {
+                    if(distance(self.origin, self.original_jugger_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_jugger_trigger = undefined;
+                        }
+                        self thread process_guardian_angel_purchase();
+                        break;
+                    }
+                }
+                else if(self.can_buy_guardian_angel && self.has_guardian_angel && self.guardian_angel_level == 1 && self sprintButtonPressed() && self.score >= self.guardian_angel_upgrade_price)
+                {
+                    if(distance(self.origin, self.original_jugger_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_jugger_trigger = undefined;
+                        }
+                        self thread process_guardian_angel_purchase();
+                        break;
+                    }
+                }
                 else if((self useButtonPressed() && self.can_buy_ethereal_razor && self.score < self.ethereal_razor_price)
-                    || (self meleeButtonPressed() && self.can_buy_dam_a_nade && self.score < self.dam_a_nade_price))
+                    || (self meleeButtonPressed() && self.can_buy_dam_a_nade && self.score < self.dam_a_nade_price)
+                    || (self sprintButtonPressed() && self.can_buy_guardian_angel && !self.has_guardian_angel && self.score < self.guardian_angel_price)
+                    || (self sprintButtonPressed() && self.can_buy_guardian_angel && self.has_guardian_angel && self.guardian_angel_level == 1 && self.score < self.guardian_angel_upgrade_price))
                 {
                     if(distance(self.origin, self.original_jugger_machine_location) <= 70)
                     {
                         self playsound("evt_perk_deny");
                         self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                        while(self useButtonPressed() || self meleeButtonPressed())
+                        while(self useButtonPressed() || self meleeButtonPressed() || self sprintButtonPressed())
                             wait 0.05;
                     }
                 }
@@ -1272,14 +1424,42 @@ show_jugg_prompt_core(trigger_var)
                         break;
                     }
                 }
+                else if(self.can_buy_timeslip && !self.has_timeslip && self sprintButtonPressed() && self.score >= self.timeslip_price)
+                {
+                    if(distance(self.origin, self.original_jugger_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_jugger_trigger = undefined;
+                        }
+                        self thread process_timeslip_purchase();
+                        break;
+                    }
+                }
+                else if(self.can_buy_timeslip && self.has_timeslip && self.timeslip_level == 1 && self sprintButtonPressed() && self.score >= self.timeslip_upgrade_price)
+                {
+                    if(distance(self.origin, self.original_jugger_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_jugger_trigger = undefined;
+                        }
+                        self thread process_timeslip_purchase();
+                        break;
+                    }
+                }
                 else if((self useButtonPressed() && self.can_buy_multi_jugger && self.score < self.jugger_price)
-                    || (self meleeButtonPressed() && !self.has_vulture && self.can_buy_vulture && self.score < self.vulture_price))
+                    || (self meleeButtonPressed() && !self.has_vulture && self.can_buy_vulture && self.score < self.vulture_price)
+                    || (self sprintButtonPressed() && self.can_buy_timeslip && !self.has_timeslip && self.score < self.timeslip_price)
+                    || (self sprintButtonPressed() && self.can_buy_timeslip && self.has_timeslip && self.timeslip_level == 1 && self.score < self.timeslip_upgrade_price))
                 {
                     if(distance(self.origin, self.original_jugger_machine_location) <= 70)
                     {
                         self playsound("evt_perk_deny");
                         self maps\mp\zombies\_zm_audio::create_and_play_dialog("general", "perk_deny", undefined, 0);
-                        while(self useButtonPressed() || self meleeButtonPressed())
+                        while(self useButtonPressed() || self meleeButtonPressed() || self sprintButtonPressed())
                             wait 0.05;
                     }
                 }
@@ -1301,11 +1481,14 @@ get_speedcola_hint_string(is_aiming)
             else
                 hint = "Hold ^3[{+activate}]^7 for Upgrade Cashback Cocktail [Cost: " + self.cashback_price + "]";
         }
-        if(self.can_buy_repairman)
+        if(self.can_buy_tactiquilla && self.tactiquilla_level < 2)
         {
             if(hint != "")
                 hint += " ^1|^7 ";
-            hint += "Press ^3[{+melee}]^7 for Repairman Rum [Cost: " + self.repairman_price + "]";
+            if(self.tactiquilla_level == 0)
+                hint += "Press ^3[{+melee}]^7 for Tactiquilla Sangria [Cost: " + self.tactiquilla_price + "]";
+            else
+                hint += "Press ^3[{+melee}]^7 for Upgrade Tactiquilla Sangria [Cost: " + self.tactiquilla_upgrade_price + "]";
         }
     }
     else
@@ -1318,9 +1501,13 @@ get_speedcola_hint_string(is_aiming)
                 hint += " ^1|^7 ";
             hint += "Press ^3[{+melee}]^7 for Multi-Speed Cola [Cost: " + self.speedcola_price + "]";
         }
-        if(hint != "")
-            hint += " ^1|^7 ";
-        hint += "Aim ^3[{+speed_throw}]^7 for More";
+        page2_avail = (self.can_buy_cashback && self.cashback_level < 2) || (self.can_buy_tactiquilla && self.tactiquilla_level < 2);
+        if(page2_avail)
+        {
+            if(hint != "")
+                hint += " ^1|^7 ";
+            hint += "Aim ^3[{+speed_throw}]^7 for More";
+        }
     }
     return hint;
 }
@@ -1331,7 +1518,7 @@ show_speedcola_pointcrusher_prompt()
     self endon("death");
     if(!self hasPerk("specialty_fastreload") || self.is_purchasing)
         return;
-    if(!self.can_buy_pointcrusher && !self.can_buy_speedcola && (!self.can_buy_cashback || self.cashback_level >= 2) && !self.can_buy_repairman)
+    if(!self.can_buy_pointcrusher && !self.can_buy_speedcola && (!self.can_buy_cashback || self.cashback_level >= 2) && (!self.can_buy_tactiquilla || self.tactiquilla_level >= 2))
         return;
     if(isDefined(self.current_speedcola_trigger))
         return;
@@ -1379,7 +1566,7 @@ show_speedcola_prompt_core(trigger_var)
                         break;
                     }
                 }
-                else if(self.can_buy_repairman && self meleeButtonPressed() && self.score >= self.repairman_price)
+                else if(self.can_buy_tactiquilla && self.tactiquilla_level == 0 && self meleeButtonPressed() && self.score >= self.tactiquilla_price)
                 {
                     if(distance(self.origin, self.original_speedcola_machine_location) <= 70)
                     {
@@ -1388,12 +1575,26 @@ show_speedcola_prompt_core(trigger_var)
                             trigger_var delete();
                             self.current_speedcola_trigger = undefined;
                         }
-                        self thread process_repairman_purchase();
+                        self thread process_tactiquilla_purchase();
+                        break;
+                    }
+                }
+                else if(self.can_buy_tactiquilla && self.tactiquilla_level == 1 && self meleeButtonPressed() && self.score >= self.tactiquilla_upgrade_price)
+                {
+                    if(distance(self.origin, self.original_speedcola_machine_location) <= 70)
+                    {
+                        if(isDefined(trigger_var))
+                        {
+                            trigger_var delete();
+                            self.current_speedcola_trigger = undefined;
+                        }
+                        self thread process_tactiquilla_purchase();
                         break;
                     }
                 }
                 else if((self useButtonPressed() && self.can_buy_cashback && self.cashback_level < 2 && self.score < self.cashback_price)
-                    || (self meleeButtonPressed() && self.can_buy_repairman && self.score < self.repairman_price))
+                    || (self meleeButtonPressed() && self.can_buy_tactiquilla && self.tactiquilla_level == 0 && self.score < self.tactiquilla_price)
+                    || (self meleeButtonPressed() && self.can_buy_tactiquilla && self.tactiquilla_level == 1 && self.score < self.tactiquilla_upgrade_price))
                 {
                     if(distance(self.origin, self.original_speedcola_machine_location) <= 70)
                     {
@@ -1674,20 +1875,14 @@ get_quickrevive_hint_string(is_aiming)
                 hint += " ^1|^7 ";
             hint += "Press ^3[{+melee}]^7 for Who's Who [Cost: " + self.whos_who_price + "]";
         }
-        if(self.can_buy_timeslip || !isDefined(self.timeslip_level) || self.timeslip_level < 2)
+        if(self.can_buy_repairman)
         {
-            if(!self.has_timeslip)
-            {
-                if(hint != "")
-                    hint += " ^1|^7 ";
-                hint += "Press ^3[{+breath_sprint}]^7 for Timeslip [Cost: " + self.timeslip_price + "]";
-            }
-            else if(self.timeslip_level == 1)
-            {
-                if(hint != "")
-                    hint += " ^1|^7 ";
-                hint += "Press ^3[{+breath_sprint}]^7 for Upgrade Timeslip [Cost: " + self.timeslip_upgrade_price + "]";
-            }
+            if(hint != "")
+                hint += " ^1|^7 ";
+            if(self.repairman_level == 0)
+                hint += "Press ^3[{+breath_sprint}]^7 for Repairman Rum [Cost: " + self.repairman_price + "]";
+            else
+                hint += "Press ^3[{+breath_sprint}]^7 for Upgrade Repairman Rum [Cost: " + self.repairman_price + "]";
         }
 
         page2_avail = (!self.has_fighters_fizz && self.can_buy_fighters_fizz)
@@ -1715,7 +1910,7 @@ show_muscle_milk_prompt()
         && (self.has_fighters_fizz || !self.can_buy_fighters_fizz)
         && ((self.has_no_bear_brew && self.has_no_bear_brew_upgrade) || (!self.can_buy_no_bear_brew && !self.can_buy_no_bear_brew_upgrade))
         && (self.pack_a_box_level >= 5 || !self.can_buy_pack_a_box)
-        && (self.timeslip_level >= 2 || !self.can_buy_timeslip);
+        && !self.can_buy_repairman;
     if(all_qr_bought)
         return;
     if(isDefined(self.current_quickrevive_trigger))
@@ -1845,7 +2040,7 @@ show_quickrevive_prompt_core(trigger_var)
                         break;
                     }
                 }
-                else if((self.can_buy_timeslip || !is_true(self.has_timeslip)) && !self.has_timeslip && self sprintButtonPressed() && self.score >= self.timeslip_price)
+                else if(self.can_buy_repairman && self sprintButtonPressed() && self.score >= self.repairman_price)
                 {
                     if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
                     {
@@ -1854,27 +2049,13 @@ show_quickrevive_prompt_core(trigger_var)
                             trigger_var delete();
                             self.current_quickrevive_trigger = undefined;
                         }
-                        self thread process_timeslip_purchase();
-                        break;
-                    }
-                }
-                else if((self.can_buy_timeslip || self.timeslip_level == 1) && self.has_timeslip && self.timeslip_level == 1 && self sprintButtonPressed() && self.score >= self.timeslip_upgrade_price)
-                {
-                    if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
-                    {
-                        if(isDefined(trigger_var))
-                        {
-                            trigger_var delete();
-                            self.current_quickrevive_trigger = undefined;
-                        }
-                        self thread process_timeslip_purchase();
+                        self thread process_repairman_purchase();
                         break;
                     }
                 }
                 else if((self useButtonPressed() && !self.has_muscle_milk && self.can_buy_muscle_milk && self.score < self.muscle_milk_price)
                     || (self meleeButtonPressed() && !self.has_whos_who && self.can_buy_whos_who && self.score < self.whos_who_price)
-                    || (self sprintButtonPressed() && !self.has_timeslip && self.score < self.timeslip_price)
-                    || (self sprintButtonPressed() && self.has_timeslip && self.timeslip_level == 1 && self.score < self.timeslip_upgrade_price))
+                    || (self sprintButtonPressed() && self.can_buy_repairman && self.score < self.repairman_price))
                 {
                     if(distance(self.origin, self.original_quickrevive_machine_location) <= 70)
                     {
@@ -2488,12 +2669,17 @@ bandolier_hud_update(cur_active_weap)
 
     if(stash > 0)
     {
+        if(!isDefined(self.bandolier_last_stash) || self.bandolier_last_stash != stash)
+        {
+            self.bandolier_last_stash = stash;
+            self.bandolier_hud settext("^3[+" + stash + "]");
+        }
         self.bandolier_hud.alpha = 1;
-        self.bandolier_hud settext("^3[+" + stash + "]");
     }
     else
     {
         self.bandolier_hud.alpha = 0;
+        self.bandolier_last_stash = 0;
     }
 }
 
@@ -2712,7 +2898,7 @@ process_cashback_purchase()
     if(self.cashback_level == 1)
     {
         self.cashback_price = 2000;
-        self iprintln("^2Cashback Cocktail Acquired!\n^320 percent cash back on all purchases!\n^1Upgrade available for 2000 (+10 percent more)");
+        self iprintln("^2Cashback Cocktail Acquired!\n^320 percent cash back on all purchases!");
     }
     else
     {
@@ -2721,14 +2907,375 @@ process_cashback_purchase()
     }
 }
 
+process_tactiquilla_purchase()
+{
+    price = (self.tactiquilla_level == 0) ? self.tactiquilla_price : self.tactiquilla_upgrade_price;
+    self process_perk_purchase("specialty_fastreload", price, self.original_speedcola_machine_location, "zombie_perk_bottle_sleight");
+    self.has_tactiquilla = true;
+    self.tactiquilla_level++;
+    self.last_speedcola_purchase_time = GetTime();
+    if(self.tactiquilla_level == 1)
+    {
+        self thread tactiquilla_sprint_fire_think();
+        self thread tactiquilla_ammo_refund_think();
+        self iprintln("^2Tactiquilla Sangria Acquired!\n^3Fire & reload while sprinting! 20 percent ammo refund & Multi-kill bonus points!");
+    }
+    else
+    {
+        self.can_buy_tactiquilla = false;
+        self iprintln("^2Tactiquilla Sangria Upgraded!\n^340 percent ammo refund & Multi-kill bonus points doubled (Max Level)!");
+    }
+}
+
+restore_player_speed_scale()
+{
+    if(self maps\mp\zombies\_zm_laststand::player_is_in_laststand() || is_true(self.fighters_fizz_active))
+        return;
+
+    expected_scale = 1.0;
+    if(self hasPerk("specialty_longersprint") && isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
+    {
+        expected_scale = 1.0 + (0.10 * self.multi_staminup_counter);
+    }
+    self setmovespeedscale(expected_scale);
+}
+
+/* Clears Tactiquilla reload-sprint state and restores native sprint permission. */
+tactiquilla_restore_reload_sprint()
+{
+    self.tactiquilla_is_reloading = false;
+    if(is_true(self.tactiquilla_sprint_blocked_for_reload))
+    {
+        self.tactiquilla_sprint_blocked_for_reload = false;
+        if(!isDefined(self._allow_sprint) || self._allow_sprint == 1)
+            self allowsprint(true);
+    }
+}
+
+/* Watches reload_start events so Tactiquilla Sangria lets players run while reloading. */
+tactiquilla_reload_watcher()
+{
+    self endon("disconnect");
+    self endon("death");
+    self endon("tactiquilla_sprint_fire_singleton");
+    self notify("tactiquilla_reload_watcher_singleton");
+    self endon("tactiquilla_reload_watcher_singleton");
+
+    while(is_true(self.has_tactiquilla))
+    {
+        self waittill("reload_start");
+        if(!is_true(self.has_tactiquilla))
+            break;
+
+        self.tactiquilla_is_reloading = true;
+        self.tactiquilla_reload_start_time = GetTime();
+        self.tactiquilla_reload_weapon = self getcurrentweapon();
+        self thread tactiquilla_reload_end_watcher();
+    }
+}
+
+/* Clears reload-running state once the reload completes or is interrupted. */
+tactiquilla_reload_end_watcher()
+{
+    self endon("disconnect");
+    self endon("death");
+    self endon("tactiquilla_sprint_fire_singleton");
+    self endon("tactiquilla_reload_watcher_singleton");
+    self notify("tactiquilla_reload_end_singleton");
+    self endon("tactiquilla_reload_end_singleton");
+
+    evt = undefined;
+    while(is_true(self.tactiquilla_is_reloading))
+    {
+        evt = self waittill_any_return("reload", "weapon_change", "weapon_change_complete", "grenade_fire", "weapon_fired", "player_downed");
+        if(evt == "weapon_fired")
+        {
+            // Ignore same-frame/burst shots queued right as reload begins
+            if(isDefined(self.tactiquilla_reload_start_time) && (GetTime() - self.tactiquilla_reload_start_time < 150))
+                continue;
+
+            // Dual-wield can fire the opposite hand while the reloading hand is still mid-reload
+            cur_wep = self getcurrentweapon();
+            if(isDefined(cur_wep) && weapondualwieldweaponname(cur_wep) != "none")
+                continue;
+        }
+        break;
+    }
+
+    if(isDefined(evt) && evt == "reload")
+        self.tactiquilla_last_fire_time = undefined;
+
+    self tactiquilla_restore_reload_sprint();
+}
+
+tactiquilla_sprint_fire_think()
+{
+    self endon("disconnect");
+    self endon("death");
+    self notify("tactiquilla_sprint_fire_singleton");
+    self endon("tactiquilla_sprint_fire_singleton");
+
+    self setperk("specialty_sprintrecovery");
+    self thread tactiquilla_reload_watcher();
+
+    tactiquilla_boosted = false;
+    tactiquilla_post_action_run = false;
+    tactiquilla_post_action_start_time = 0;
+    tactiquilla_post_action_held_sprint = false;
+
+    while(is_true(self.has_tactiquilla))
+    {
+        if(self maps\mp\zombies\_zm_laststand::player_is_in_laststand() || is_true(self.fighters_fizz_active))
+        {
+            self tactiquilla_restore_reload_sprint();
+            tactiquilla_post_action_run = false;
+            tactiquilla_post_action_held_sprint = false;
+            if(tactiquilla_boosted)
+            {
+                tactiquilla_boosted = false;
+                self.tactiquilla_active_speed_scale = undefined;
+                self restore_player_speed_scale();
+            }
+            wait 0.2;
+            continue;
+        }
+
+        vel = self getvelocity();
+        speed_2d = length((vel[0], vel[1], 0));
+        cur_time = GetTime();
+
+        if(is_true(self.tactiquilla_is_reloading))
+        {
+            reload_timed_out = (isDefined(self.tactiquilla_reload_start_time) && (cur_time - self.tactiquilla_reload_start_time > 8000));
+            reload_weapon_changed = (isDefined(self.tactiquilla_reload_weapon) && self getcurrentweapon() != self.tactiquilla_reload_weapon);
+            if(reload_timed_out || reload_weapon_changed || self isswitchingweapons() || self isthrowinggrenade() || self meleeButtonPressed())
+            {
+                self tactiquilla_restore_reload_sprint();
+            }
+            else if(!is_true(self.tactiquilla_sprint_blocked_for_reload) && !is_true(self.is_sliding))
+            {
+                // Block engine sprint-cancel while reloading so pressing/holding sprint runs at full speed instead of aborting the reload
+                if(!isDefined(self._allow_sprint) || self._allow_sprint == 1)
+                {
+                    self allowsprint(false);
+                    self.tactiquilla_sprint_blocked_for_reload = true;
+                }
+            }
+        }
+        else if(is_true(self.tactiquilla_sprint_blocked_for_reload))
+        {
+            self tactiquilla_restore_reload_sprint();
+        }
+
+        if(self isSprinting() || (self sprintbuttonpressed() && speed_2d > 40))
+        {
+            self.tactiquilla_last_sprint_time = cur_time;
+        }
+        else if(self adsbuttonpressed() || self getstance() != "stand" || speed_2d <= 40)
+        {
+            self.tactiquilla_last_sprint_time = undefined;
+        }
+
+        is_reloading = is_true(self.tactiquilla_is_reloading);
+
+        if(self attackbuttonpressed() && !is_reloading)
+        {
+            self.tactiquilla_last_fire_time = cur_time;
+        }
+
+        // Short 150ms latch catches single-frame mouse clicks; post-action sprint carries momentum without an arbitrary cutoff
+        recently_fired = (isDefined(self.tactiquilla_last_fire_time) && (cur_time - self.tactiquilla_last_fire_time < 150));
+        is_firing = (self attackbuttonpressed() && !is_reloading) || recently_fired;
+        in_action = is_firing || is_reloading;
+
+        // Carry sprint forward after firing (semi-auto/burst/bolt-action/auto) or reloading until natural sprint stop or stamina exhaustion
+        if(!in_action && tactiquilla_boosted && !tactiquilla_post_action_run)
+        {
+            if(!self isSprinting() && speed_2d > 40 && self getstance() == "stand" && !self adsbuttonpressed() && !self meleeButtonPressed() && !self isswitchingweapons() && !self isthrowinggrenade() && !is_true(self.is_sliding))
+            {
+                tactiquilla_post_action_run = true;
+                tactiquilla_post_action_start_time = cur_time;
+                tactiquilla_post_action_held_sprint = self sprintbuttonpressed();
+            }
+        }
+
+        if(tactiquilla_post_action_run)
+        {
+            if(in_action)
+            {
+                tactiquilla_post_action_run = false;
+                tactiquilla_post_action_held_sprint = false;
+            }
+            else
+            {
+                max_sprint_ms = 4000;
+                if(self hasPerk("specialty_longersprint"))
+                {
+                    if(isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
+                        max_sprint_ms = 9999999;
+                    else
+                        max_sprint_ms = 8000;
+                }
+
+                released_held_sprint = (tactiquilla_post_action_held_sprint && !self sprintbuttonpressed());
+                if(self isSprinting() || speed_2d <= 40 || self getstance() != "stand" || self adsbuttonpressed() || self meleeButtonPressed() || self isswitchingweapons() || self isthrowinggrenade() || is_true(self.is_sliding) || released_held_sprint || (cur_time - tactiquilla_post_action_start_time >= max_sprint_ms))
+                {
+                    tactiquilla_post_action_run = false;
+                    tactiquilla_post_action_held_sprint = false;
+                }
+            }
+        }
+
+        was_running = (isDefined(self.tactiquilla_last_sprint_time) && (cur_time - self.tactiquilla_last_sprint_time < 500));
+        is_trying_to_run = (self sprintbuttonpressed() || was_running || self isSprinting() || tactiquilla_boosted);
+
+        // Player is firing, reloading, or continuing sprint right after firing/reloading while moving
+        if((in_action && is_trying_to_run && speed_2d > 40 && self getstance() == "stand" && !self adsbuttonpressed() && !is_true(self.is_sliding)) || tactiquilla_post_action_run)
+        {
+            self.tactiquilla_last_sprint_time = cur_time;
+
+            if(!tactiquilla_boosted)
+            {
+                tactiquilla_boosted = true;
+                staminup_mult = 1.0;
+                if(isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
+                    staminup_mult = 1.0 + (0.10 * self.multi_staminup_counter);
+
+                self.tactiquilla_active_speed_scale = 1.55 * staminup_mult;
+                self setmovespeedscale(self.tactiquilla_active_speed_scale);
+            }
+        }
+        else
+        {
+            if(tactiquilla_boosted)
+            {
+                tactiquilla_boosted = false;
+                self.tactiquilla_active_speed_scale = undefined;
+                self restore_player_speed_scale();
+            }
+        }
+
+        wait 0.05;
+    }
+
+    self tactiquilla_restore_reload_sprint();
+    if(tactiquilla_boosted)
+    {
+        self.tactiquilla_active_speed_scale = undefined;
+        self restore_player_speed_scale();
+    }
+}
+
+tactiquilla_ammo_refund_think()
+{
+    self endon("disconnect");
+    self endon("death");
+    self notify("tactiquilla_ammo_refund_singleton");
+    self endon("tactiquilla_ammo_refund_singleton");
+
+    while(is_true(self.has_tactiquilla))
+    {
+        self waittill("weapon_fired", weapon);
+
+        self.tactiquilla_last_fire_time = GetTime();
+
+        if(!is_true(self.has_tactiquilla))
+            break;
+
+        if(!isDefined(weapon) || weapon == "none")
+            continue;
+
+        if(maps\mp\zombies\_zm_utility::is_zombie_perk_bottle(weapon))
+            continue;
+
+        if(issubstr(weapon, "grenade") || issubstr(weapon, "frag") || issubstr(weapon, "semtex") || issubstr(weapon, "claymore") || issubstr(weapon, "betty") || issubstr(weapon, "knife") || issubstr(weapon, "melee") || issubstr(weapon, "shield"))
+            continue;
+
+        clip_size = weaponclipsize(weapon);
+        if(clip_size <= 0)
+            continue;
+
+        chance = (self.tactiquilla_level >= 2) ? 40 : 20;
+        if(randomint(100) < chance)
+        {
+            cur_clip = self getweaponammoclip(weapon);
+            if(cur_clip < clip_size)
+            {
+                self setweaponammoclip(weapon, cur_clip + 1);
+            }
+            else
+            {
+                cur_stock = self getweaponammostock(weapon);
+                max_stock = weaponmaxammo(weapon);
+                if(cur_stock < max_stock)
+                {
+                    self setweaponammostock(weapon, cur_stock + 1);
+                }
+            }
+        }
+    }
+}
+
+tactiquilla_on_zombie_kill()
+{
+    self endon("disconnect");
+    self endon("death");
+
+    cur_time = GetTime();
+    if(!isDefined(self.tactiquilla_last_kill_time) || (cur_time - self.tactiquilla_last_kill_time > 1500))
+    {
+        self.tactiquilla_multikill_count = 1;
+        self thread tactiquilla_multikill_timer();
+    }
+    else
+    {
+        self.tactiquilla_multikill_count++;
+    }
+    self.tactiquilla_last_kill_time = cur_time;
+}
+
+tactiquilla_multikill_timer()
+{
+    self endon("disconnect");
+    self endon("death");
+    self notify("tactiquilla_multikill_timer_singleton");
+    self endon("tactiquilla_multikill_timer_singleton");
+
+    while(true)
+    {
+        wait 0.1;
+        if(!isDefined(self.tactiquilla_last_kill_time) || (GetTime() - self.tactiquilla_last_kill_time >= 1500))
+            break;
+    }
+
+    count = self.tactiquilla_multikill_count;
+    self.tactiquilla_multikill_count = 0;
+
+    if(isDefined(count) && count >= 2)
+    {
+        points_per_kill = (self.tactiquilla_level >= 2) ? 20 : 10;
+        bonus_points = count * points_per_kill;
+
+        if(isDefined(self.multi_pointcrusher_counter) && self.multi_pointcrusher_counter > 0)
+        {
+            bonus_points *= (self.multi_pointcrusher_counter + 1);
+        }
+
+        self maps\mp\zombies\_zm_score::add_to_player_score(bonus_points);
+        self playsoundtoplayer("zmb_cha_ching", self);
+        self iprintln("^2Multi-Kill x" + count + "! ^3+" + bonus_points + " Bonus Points^7");
+    }
+}
+
 process_repairman_purchase()
 {
     price = self.repairman_price;
-    self process_perk_purchase("specialty_fastreload", price, self.original_speedcola_machine_location, "zombie_perk_bottle_sleight");
+    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
+    self process_perk_purchase("specialty_quickrevive", price, self.original_quickrevive_machine_location, bottle);
     self.has_repairman = true;
     self.repairman_level++;
     self.repairman_price = 2000 * (self.repairman_level + 1);
-    self.last_speedcola_purchase_time = GetTime();
+    self.last_quickrevive_purchase_time = GetTime();
     self iprintln("^2Repairman Rum Level " + self.repairman_level + "!\n^3Repairs window barriers super fast!\n^1Barrier repair points: x" + (4 * self.repairman_level) + "!");
 }
 
@@ -2828,23 +3375,75 @@ process_pack_a_box_purchase()
 
 process_timeslip_purchase()
 {
-    bottle = isDefined(level.quickrevive_bottle) ? level.quickrevive_bottle : "zombie_perk_bottle_revive";
     if(!self.has_timeslip)
     {
-        self process_perk_purchase("specialty_quickrevive", self.timeslip_price, self.original_quickrevive_machine_location, bottle, self.has_timeslip);
+        self process_perk_purchase("specialty_armorvest", self.timeslip_price, self.original_jugger_machine_location, "zombie_perk_bottle_jugg", self.has_timeslip);
         self.has_timeslip = true;
         self.timeslip_level = 1;
-        self.last_quickrevive_purchase_time = GetTime();
+        self.last_jugger_purchase_time = GetTime();
         self iprintln("^2Timeslip Acquired!\n^3Speeds up Mystery Box, Der Wunderfizz, and Pack-A-Punch speed!");
     }
     else if(self.timeslip_level == 1)
     {
-        self process_perk_purchase("specialty_quickrevive", self.timeslip_upgrade_price, self.original_quickrevive_machine_location, bottle, false);
+        self process_perk_purchase("specialty_armorvest", self.timeslip_upgrade_price, self.original_jugger_machine_location, "zombie_perk_bottle_jugg", false);
         self.timeslip_level = 2;
         self.can_buy_timeslip = false;
-        self.last_quickrevive_purchase_time = GetTime();
+        self.last_jugger_purchase_time = GetTime();
         self iprintln("^2Timeslip Upgraded!\n^3Instant Mystery Box, accelerated Der Wunderfizz, and lightning-fast Pack-A-Punch!");
     }
+}
+
+process_guardian_angel_purchase()
+{
+    if(!self.has_guardian_angel)
+    {
+        self process_perk_purchase("specialty_armorvest", self.guardian_angel_price, self.original_jugger_machine_location, "zombie_perk_bottle_jugg", self.has_guardian_angel);
+        self.has_guardian_angel = true;
+        self.guardian_angel_level = 1;
+        self.guardian_angel_active = false;
+        self.guardian_angel_charging = false;
+        self.guardian_angel_kills = self.guardian_angel_kills_needed;
+        self.last_jugger_purchase_time = GetTime();
+        self iprintln("^2Guardian Angel Ale Acquired!\n^3Taking damage activates 5 seconds of invincibility!\n^1Kill 25 zombies to recharge!");
+    }
+    else if(self.guardian_angel_level == 1)
+    {
+        self process_perk_purchase("specialty_armorvest", self.guardian_angel_upgrade_price, self.original_jugger_machine_location, "zombie_perk_bottle_jugg", false);
+        self.guardian_angel_level = 2;
+        self.can_buy_guardian_angel = false;
+        self.last_jugger_purchase_time = GetTime();
+        self iprintln("^2Guardian Angel Ale Upgraded!\n^3Taking damage while charging grants 0.6s invincibility buffer!");
+    }
+}
+
+guardian_angel_activate()
+{
+    self endon("disconnect");
+    self endon("death");
+
+    self.guardian_angel_active = true;
+    self.guardian_angel_charging = true;
+    self.guardian_angel_kills = 0;
+
+    self iprintlnbold("^5[Guardian Angel Invincibility Active! (5s)]^7");
+    self playsoundtoplayer("zmb_perks_jugga_upgrade", self);
+
+    wait 5.0;
+
+    self.guardian_angel_active = false;
+    self iprintln("^3Guardian Angel Ale Expired! Kill 25 zombies to recharge!^7");
+}
+
+guardian_angel_buffer_activate()
+{
+    self endon("disconnect");
+    self endon("death");
+
+    self.guardian_angel_buffer_active = true;
+
+    wait 0.6;
+
+    self.guardian_angel_buffer_active = false;
 }
 
 process_staminup_jetpack_purchase()
@@ -2866,7 +3465,13 @@ process_multi_staminup_purchase()
     scale = 1.0 + (0.10 * self.multi_staminup_counter);
     self setmovespeedscale(scale);
 
-    self iprintln("^3Multi-Stamin-Up Level " + self.multi_staminup_counter + "\n^2Speed increased by +10 percent\n^3Total Speed: +" + (self.multi_staminup_counter * 10) + " percent faster!");
+    self setperk("specialty_unlimitedsprint");
+    self setclientdvar("player_sprintUnlimited", "1");
+    setdvar("player_sprintUnlimited", 1);
+    self setclientdvar("player_sprintTime", "999.0");
+    setdvar("player_sprintTime", 999.0);
+
+    self iprintln("^3Multi-Stamin-Up Level " + self.multi_staminup_counter + "\n^2Speed: +" + (self.multi_staminup_counter * 10) + " percent | ^1You now have unlimited sprint!");
 }
 
 process_bandolier_bandit_purchase()
@@ -3608,8 +4213,10 @@ whos_who_corpse_cleanup_on_spectator(player)
 whos_who_corpse_revive_icon(player)
 {
     self endon("death");
+    if(!isDefined(player))
+        return;
     height_offset = 30;
-    hud_elem = newhudelem();
+    hud_elem = newclienthudelem(player);
     self.revive_hud_elem = hud_elem;
     hud_elem.x = self.origin[0];
     hud_elem.y = self.origin[1];
@@ -3621,13 +4228,12 @@ whos_who_corpse_revive_icon(player)
     hud_elem.hidewheninmenu = 1;
     hud_elem.immunetodemogamehudsettings = 1;
 
-    while(isDefined(self.revive_hud_elem))
+    while(isDefined(self.revive_hud_elem) && isDefined(player))
     {
-        hud_elem.x = self.origin[0];
-        hud_elem.y = self.origin[1];
-        hud_elem.z = self.origin[2] + height_offset;
-        wait 0.01;
+        wait 0.5;
     }
+    if(isDefined(hud_elem))
+        hud_elem destroy();
 }
 
 whos_who_revive_hud_create()
@@ -3978,63 +4584,56 @@ perk_bought_check()
         if(self hasPerk("specialty_additionalprimaryweapon") && !isDefined(self.original_mule_kick_machine_location))
         {
             self.original_mule_kick_machine_location = self get_player_perk_machine_location("mule_kick");
-            self.last_mule_kick_purchase_time = GetTime();
-            self.can_buy_multi_mule = false; wait 1; self.can_buy_multi_mule = true;
+            self.last_mule_kick_purchase_time = GetTime() - 1000;
+            self.can_buy_multi_mule = true;
         }
         
         if(self hasPerk("specialty_armorvest") && !isDefined(self.original_jugger_machine_location))
         {
             self.original_jugger_machine_location = self get_player_perk_machine_location("jugger");
-            self.last_jugger_purchase_time = GetTime();
-            self.can_buy_multi_jugger = false;
-            self.can_buy_vulture = false;
-            self.can_buy_ethereal_razor = false;
-            self.can_buy_dam_a_nade = false;
-            wait 1;
+            self.last_jugger_purchase_time = GetTime() - 1000;
             self.can_buy_multi_jugger = true;
             self.can_buy_vulture = true;
             self.can_buy_ethereal_razor = true;
             self.can_buy_dam_a_nade = true;
+            if(self.timeslip_level < 2)
+                self.can_buy_timeslip = true;
+            if(self.guardian_angel_level < 2)
+                self.can_buy_guardian_angel = true;
         }
         
         if(self hasPerk("specialty_longersprint") && !isDefined(self.original_staminup_machine_location))
         {
             self.original_staminup_machine_location = self get_player_perk_machine_location("staminup");
-            self.last_staminup_purchase_time = GetTime();
-            self.can_buy_jetpack = false;
-            self.can_buy_staminup = false;
-            self.can_buy_bandolier_bandit = false;
-            self.can_buy_blood_bullets = false;
-            self.can_buy_nitrogen_cooled = false;
-            wait 1;
+            self.last_staminup_purchase_time = GetTime() - 1000;
             self.can_buy_jetpack = true;
             self.can_buy_staminup = true;
             self.can_buy_bandolier_bandit = true;
-            self.can_buy_blood_bullets = true;
-            self.can_buy_nitrogen_cooled = true;
+            if(!is_true(self.has_blood_bullets))
+                self.can_buy_blood_bullets = true;
+            if(!is_true(self.has_nitrogen_cooled))
+                self.can_buy_nitrogen_cooled = true;
         }
         
         if(self hasPerk("specialty_fastreload") && !isDefined(self.original_speedcola_machine_location))
         {
             self.original_speedcola_machine_location = self get_player_perk_machine_location("speedcola");
-            self.last_speedcola_purchase_time = GetTime();
-            self.can_buy_pointcrusher = false;
-            self.can_buy_speedcola = false;
-            self.can_buy_cashback = false;
-            self.can_buy_repairman = false;
-            wait 1;
+            self.last_speedcola_purchase_time = GetTime() - 1000;
             self.can_buy_pointcrusher = true;
             self.can_buy_speedcola = true;
-            self.can_buy_cashback = true;
-            self.can_buy_repairman = true;
+            if(!isDefined(self.cashback_level) || self.cashback_level < 2)
+                self.can_buy_cashback = true;
+            if(!isDefined(self.tactiquilla_level) || self.tactiquilla_level < 2)
+                self.can_buy_tactiquilla = true;
         }
         
         if(self hasPerk("specialty_quickrevive") && !isDefined(self.original_quickrevive_machine_location))
         {
             self.original_quickrevive_machine_location = self get_player_perk_machine_location("quickrevive");
-            self.last_quickrevive_purchase_time = GetTime();
+            self.last_quickrevive_purchase_time = GetTime() - 1000;
             self.can_buy_muscle_milk = true;
             self.can_buy_whos_who = true;
+            self.can_buy_repairman = true;
             if(!is_true(self.has_fighters_fizz))
                 self.can_buy_fighters_fizz = true;
             if(!is_true(self.has_no_bear_brew))
@@ -4043,20 +4642,13 @@ perk_bought_check()
                 self.can_buy_no_bear_brew_upgrade = true;
             if(self.pack_a_box_level < 5)
                 self.can_buy_pack_a_box = true;
-            if(self.timeslip_level < 2)
-                self.can_buy_timeslip = true;
         }
 
         if(self hasPerk("specialty_rof") && !isDefined(self.original_doubletap_machine_location))
         {
             self.original_doubletap_machine_location = self get_player_perk_machine_location("doubletap");
-            self.last_doubletap_purchase_time = GetTime();
+            self.last_doubletap_purchase_time = GetTime() - 1000;
             if(!isDefined(self.punchcola_damage_level)) self.punchcola_damage_level = 1;
-            self.can_buy_punchcola = false;
-            self.can_buy_winters_wail = false;
-            self.can_buy_doubletap_1 = false;
-            self.can_buy_vigor_rush = false;
-            wait 1;
             self.can_buy_punchcola = true;
             self.can_buy_winters_wail = true;
             self.can_buy_doubletap_1 = true;
@@ -4152,6 +4744,19 @@ monitor_perk_status()
                     self.dam_a_nade_level = 0;
                     self.dam_a_nade_price = 2500;
                     self.can_buy_dam_a_nade = false;
+                    self.has_timeslip = false;
+                    self.timeslip_level = 0;
+                    self.timeslip_price = 2500;
+                    self.timeslip_upgrade_price = 1500;
+                    self.can_buy_timeslip = false;
+                    self.has_guardian_angel = false;
+                    self.guardian_angel_level = 0;
+                    self.guardian_angel_price = 4000;
+                    self.guardian_angel_upgrade_price = 2000;
+                    self.can_buy_guardian_angel = false;
+                    self.guardian_angel_active = false;
+                    self.guardian_angel_charging = false;
+                    self.guardian_angel_buffer_active = false;
                     self.original_jugger_machine_location = undefined;
                     self.last_jugger_purchase_time = 0;
                     if(isDefined(self.current_jugger_trigger))
@@ -4166,13 +4771,15 @@ monitor_perk_status()
                 self.had_juggernog = true;
                 if(!isDefined(self.original_jugger_machine_location))
                     self.original_jugger_machine_location = self get_player_perk_machine_location("jugger");
-                if(GetTime() - self.last_jugger_purchase_time >= 1000)
-                {
-                    self.can_buy_multi_jugger = true;
-                    self.can_buy_vulture = true;
-                    self.can_buy_ethereal_razor = true;
-                    self.can_buy_dam_a_nade = true;
-                }
+                self.can_buy_multi_jugger = true;
+                self.can_buy_vulture = true;
+                self.can_buy_ethereal_razor = true;
+                self.can_buy_dam_a_nade = true;
+                if(self.timeslip_level < 2)
+                    self.can_buy_timeslip = true;
+                if(self.guardian_angel_level < 2)
+                    self.can_buy_guardian_angel = true;
+
                 if(isDefined(self.multi_juggernog_counter) && self.multi_juggernog_counter > 1)
                 {
                     min_health = 250 + ((self.multi_juggernog_counter - 1) * 150);
@@ -4218,7 +4825,13 @@ monitor_perk_status()
                     self.can_buy_blood_bullets = false;
                     self.has_nitrogen_cooled = false;
                     self.can_buy_nitrogen_cooled = false;
-                    self setmovespeedscale(1.0);
+                    if(!isDefined(self.tactiquilla_active_speed_scale))
+                    {
+                        self setmovespeedscale(1.0);
+                    }
+                    self unsetperk("specialty_unlimitedsprint");
+                    self setclientdvar("player_sprintTime", "4.0");
+                    self setclientdvar("player_sprintUnlimited", "0");
                     self.original_staminup_machine_location = undefined;
                     self.last_staminup_purchase_time = 0;
                     if(isDefined(self.current_staminup_trigger))
@@ -4233,25 +4846,29 @@ monitor_perk_status()
                 self.had_staminup = true;
                 if(!isDefined(self.original_staminup_machine_location))
                     self.original_staminup_machine_location = self get_player_perk_machine_location("staminup");
-                if(GetTime() - self.last_staminup_purchase_time >= 1000)
-                {
-                    self.can_buy_jetpack = true;
-                    self.can_buy_staminup = true;
-                    self.can_buy_bandolier_bandit = true;
-                    if(!is_true(self.has_blood_bullets))
-                        self.can_buy_blood_bullets = true;
-                    if(!is_true(self.has_nitrogen_cooled))
-                        self.can_buy_nitrogen_cooled = true;
-                }
+                self.can_buy_jetpack = true;
+                self.can_buy_staminup = true;
+                self.can_buy_bandolier_bandit = true;
+                if(!is_true(self.has_blood_bullets))
+                    self.can_buy_blood_bullets = true;
+                if(!is_true(self.has_nitrogen_cooled))
+                    self.can_buy_nitrogen_cooled = true;
+
                 if(isDefined(self.multi_staminup_counter) && self.multi_staminup_counter > 0)
                 {
                     if(!self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.fighters_fizz_active))
                     {
-                        if(!isDefined(self.n_move_scale) || self.n_move_scale >= 1.0)
+                        if((!isDefined(self.n_move_scale) || self.n_move_scale >= 1.0) && !isDefined(self.tactiquilla_active_speed_scale))
                         {
                             expected_scale = 1.0 + (0.10 * self.multi_staminup_counter);
                             self setmovespeedscale(expected_scale);
                         }
+                    }
+                    if(!self hasperk("specialty_unlimitedsprint"))
+                    {
+                        self setperk("specialty_unlimitedsprint");
+                        self setclientdvar("player_sprintUnlimited", "1");
+                        self setclientdvar("player_sprintTime", "999.0");
                     }
                 }
             }
@@ -4281,10 +4898,14 @@ monitor_perk_status()
                     self.cashback_level = 0;
                     self.cashback_price = 3000;
                     self.can_buy_cashback = false;
-                    self.has_repairman = false;
-                    self.repairman_level = 0;
-                    self.repairman_price = 2000;
-                    self.can_buy_repairman = false;
+                    self.has_tactiquilla = false;
+                    self.tactiquilla_level = 0;
+                    self.tactiquilla_price = 2000;
+                    self.tactiquilla_upgrade_price = 1500;
+                    self.can_buy_tactiquilla = false;
+                    self.tactiquilla_active_speed_scale = undefined;
+                    self tactiquilla_restore_reload_sprint();
+                    self unsetperk("specialty_sprintrecovery");
                     if(isDefined(level.default_weap_reload_mult))
                     {
                         self setclientdvar("perk_weapReloadMultiplier", "" + level.default_weap_reload_mult);
@@ -4304,14 +4925,13 @@ monitor_perk_status()
                 self.had_speedcola = true;
                 if(!isDefined(self.original_speedcola_machine_location))
                     self.original_speedcola_machine_location = self get_player_perk_machine_location("speedcola");
-                if(GetTime() - self.last_speedcola_purchase_time >= 1000)
-                {
-                    self.can_buy_pointcrusher = true;
-                    self.can_buy_speedcola = true;
-                    if(!isDefined(self.cashback_level) || self.cashback_level < 2)
-                        self.can_buy_cashback = true;
-                    self.can_buy_repairman = true;
-                }
+                self.can_buy_pointcrusher = true;
+                self.can_buy_speedcola = true;
+                if(!isDefined(self.cashback_level) || self.cashback_level < 2)
+                    self.can_buy_cashback = true;
+                if(!isDefined(self.tactiquilla_level) || self.tactiquilla_level < 2)
+                    self.can_buy_tactiquilla = true;
+
                 if(isDefined(self.multi_speedcola_counter) && self.multi_speedcola_counter > 0)
                 {
                     base_mult = 0.5;
@@ -4355,11 +4975,10 @@ monitor_perk_status()
                     self.pack_a_box_level = 0;
                     self.pack_a_box_price = 2500;
                     self.can_buy_pack_a_box = false;
-                    self.has_timeslip = false;
-                    self.timeslip_level = 0;
-                    self.timeslip_price = 2000;
-                    self.timeslip_upgrade_price = 1500;
-                    self.can_buy_timeslip = false;
+                    self.has_repairman = false;
+                    self.repairman_level = 0;
+                    self.repairman_price = 2000;
+                    self.can_buy_repairman = false;
                     self.original_quickrevive_machine_location = undefined;
                     self.last_quickrevive_purchase_time = 0;
                     if(isDefined(self.current_quickrevive_trigger))
@@ -4374,21 +4993,17 @@ monitor_perk_status()
                 self.had_quickrevive = true;
                 if(!isDefined(self.original_quickrevive_machine_location))
                     self.original_quickrevive_machine_location = self get_player_perk_machine_location("quickrevive");
-                if(GetTime() - self.last_quickrevive_purchase_time >= 1000)
-                {
-                    self.can_buy_muscle_milk = true;
-                    self.can_buy_whos_who = true;
-                    if(!is_true(self.has_fighters_fizz))
-                        self.can_buy_fighters_fizz = true;
-                    if(!is_true(self.has_no_bear_brew))
-                        self.can_buy_no_bear_brew = true;
-                    else if(!is_true(self.has_no_bear_brew_upgrade))
-                        self.can_buy_no_bear_brew_upgrade = true;
-                    if(self.pack_a_box_level < 5)
-                        self.can_buy_pack_a_box = true;
-                    if(self.timeslip_level < 2)
-                        self.can_buy_timeslip = true;
-                }
+                self.can_buy_muscle_milk = true;
+                self.can_buy_whos_who = true;
+                self.can_buy_repairman = true;
+                if(!is_true(self.has_fighters_fizz))
+                    self.can_buy_fighters_fizz = true;
+                if(!is_true(self.has_no_bear_brew))
+                    self.can_buy_no_bear_brew = true;
+                else if(!is_true(self.has_no_bear_brew_upgrade))
+                    self.can_buy_no_bear_brew_upgrade = true;
+                if(self.pack_a_box_level < 5)
+                    self.can_buy_pack_a_box = true;
             }
 
             // Double Tap
@@ -4439,14 +5054,11 @@ monitor_perk_status()
                 self.had_doubletap = true;
                 if(!isDefined(self.original_doubletap_machine_location))
                     self.original_doubletap_machine_location = self get_player_perk_machine_location("doubletap");
-                if(GetTime() - self.last_doubletap_purchase_time >= 1000)
-                {
-                    self.can_buy_punchcola = true;
-                    self.can_buy_winters_wail = true;
-                    self.can_buy_doubletap_1 = true;
-                    if(!is_true(self.has_vigor_rush))
-                        self.can_buy_vigor_rush = true;
-                }
+                self.can_buy_punchcola = true;
+                self.can_buy_winters_wail = true;
+                self.can_buy_doubletap_1 = true;
+                if(!is_true(self.has_vigor_rush))
+                    self.can_buy_vigor_rush = true;
                 if(isDefined(self.doubletap_1_level) && self.doubletap_1_level > 0)
                 {
                     base_mult = 1.0;
@@ -4762,6 +5374,31 @@ multi_perks_actor_damage_wrapper( inflictor, attacker, damage, flags, meansofdea
                 attacker notify("fighters_fizz_kill");
             }
         }
+
+        // Guardian Angel Ale recharge kill detection
+        if(is_true(attacker.has_guardian_angel) && is_true(attacker.guardian_angel_charging))
+        {
+            if(final_damage >= self.health || (isDefined(self.health) && self.health <= 0) || !isAlive(self))
+            {
+                attacker.guardian_angel_kills++;
+                if(attacker.guardian_angel_kills >= attacker.guardian_angel_kills_needed)
+                {
+                    attacker.guardian_angel_charging = false;
+                    attacker.guardian_angel_kills = attacker.guardian_angel_kills_needed;
+                    attacker iprintln("^2Guardian Angel Ale Fully Charged! Ready to protect!");
+                    attacker playsoundtoplayer("zmb_perks_packa_ready", attacker);
+                }
+            }
+        }
+
+        // Tactiquilla Sangria multi-kill detection
+        if(is_true(attacker.has_tactiquilla))
+        {
+            if(final_damage >= self.health || (isDefined(self.health) && self.health <= 0) || !isAlive(self))
+            {
+                attacker thread tactiquilla_on_zombie_kill();
+            }
+        }
     }
 
     old_maxhealth = undefined;
@@ -4818,6 +5455,30 @@ multi_perks_player_damage_wrapper( einflictor, eattacker, idamage, idflags, smea
     {
         if(self.jump_boost > 0 || (isDefined(self.last_boost_time) && (GetTime() - self.last_boost_time < 2500)))
             return 0;
+    }
+
+    // Guardian Angel Ale invincibility checks
+    if(is_true(self.has_guardian_angel) && !self maps\mp\zombies\_zm_laststand::player_is_in_laststand() && !is_true(self.fighters_fizz_active))
+    {
+        if(is_true(self.guardian_angel_active))
+            return 0;
+
+        if(is_true(self.guardian_angel_buffer_active))
+            return 0;
+
+        // If charging and level 2 (upgraded): taking damage grants 0.6s invincibility buffer (first hit connects, subsequent hits blocked)
+        if(is_true(self.guardian_angel_charging))
+        {
+            if(self.guardian_angel_level >= 2)
+            {
+                self thread guardian_angel_buffer_activate();
+            }
+        }
+        else // Fully charged: taking damage activates 5 seconds of invincibility!
+        {
+            self thread guardian_angel_activate();
+            return 0;
+        }
     }
 
     final_damage = idamage;
@@ -5056,8 +5717,11 @@ monitor_staminup_speed()
             {
                 if(!isDefined(self.n_move_scale) || self.n_move_scale >= 1.0)
                 {
-                    expected_scale = 1.0 + (0.10 * self.multi_staminup_counter);
-                    self setmovespeedscale(expected_scale);
+                    if(!isDefined(self.tactiquilla_active_speed_scale))
+                    {
+                        expected_scale = 1.0 + (0.10 * self.multi_staminup_counter);
+                        self setmovespeedscale(expected_scale);
+                    }
                 }
             }
         }
@@ -5323,11 +5987,37 @@ do_exo_slide()
         if(i % 3 == 0)
         {
             zombies = get_round_enemy_array();
+            hit_zombie = false;
             foreach(z in zombies)
             {
                 if(isDefined(z) && isAlive(z) && distance2d(self.origin, z.origin) <= 45 && abs(self.origin[2] - z.origin[2]) <= 40)
                 {
                     z dodamage(100, self.origin, self, self, "MOD_IMPACT");
+                    hit_zombie = true;
+                }
+            }
+
+            if(hit_zombie && (!isDefined(self.last_slide_explo_time) || (GetTime() - self.last_slide_explo_time >= 5000)))
+            {
+                self.last_slide_explo_time = GetTime();
+                self playsound("zmb_phdflop_explo");
+                earthquake(0.45, 0.6, self.origin, 650);
+                self playrumbleonentity("damage_heavy");
+
+                if(isDefined(level._effect["exo_slam_explosion"]))
+                    playfx(level._effect["exo_slam_explosion"], self.origin);
+                else if(isDefined(level._effect["divetonuke_groundhit"]))
+                    playfx(level._effect["divetonuke_groundhit"], self.origin);
+                else
+                    playfx(loadfx("explosions/fx_default_explosion"), self.origin);
+
+                nearby_zombies = get_round_enemy_array();
+                foreach(nz in nearby_zombies)
+                {
+                    if(isDefined(nz) && isAlive(nz) && distance(nz.origin, self.origin) <= 220)
+                    {
+                        nz dodamage(nz.health + 5000, self.origin, self, self, "MOD_GRENADE_SPLASH");
+                    }
                 }
             }
         }
@@ -5560,6 +6250,10 @@ monitor_player_weapons()
                 self.fighters_fizz_saved_pack_a_box_lvl = self.pack_a_box_level;
                 self.fighters_fizz_saved_has_timeslip = self.has_timeslip;
                 self.fighters_fizz_saved_timeslip_lvl = self.timeslip_level;
+                self.fighters_fizz_saved_has_guardian = self.has_guardian_angel;
+                self.fighters_fizz_saved_guardian_lvl = self.guardian_angel_level;
+                self.fighters_fizz_saved_has_tactiquilla = self.has_tactiquilla;
+                self.fighters_fizz_saved_tactiquilla_lvl = self.tactiquilla_level;
             }
         }
         wait 0.25;
@@ -6142,6 +6836,14 @@ fighters_fizz_restore_perks(had_qr, saved_lives)
         self.cashback_level = self.fighters_fizz_saved_cashback_lvl;
     }
 
+    if(is_true(self.fighters_fizz_saved_has_tactiquilla))
+    {
+        self.has_tactiquilla = true;
+        self.tactiquilla_level = self.fighters_fizz_saved_tactiquilla_lvl;
+        self thread tactiquilla_sprint_fire_think();
+        self thread tactiquilla_ammo_refund_think();
+    }
+
     if(is_true(self.fighters_fizz_saved_has_repairman))
     {
         self.has_repairman = true;
@@ -6231,6 +6933,19 @@ fighters_fizz_restore_perks(had_qr, saved_lives)
             self.can_buy_timeslip = false;
         else
             self.can_buy_timeslip = true;
+    }
+
+    if(is_true(self.fighters_fizz_saved_has_guardian))
+    {
+        self.has_guardian_angel = true;
+        self.guardian_angel_level = self.fighters_fizz_saved_guardian_lvl;
+        self.guardian_angel_active = false;
+        self.guardian_angel_charging = false;
+        self.guardian_angel_kills = self.guardian_angel_kills_needed;
+        if(self.guardian_angel_level >= 2)
+            self.can_buy_guardian_angel = false;
+        else
+            self.can_buy_guardian_angel = true;
     }
 
     self.has_fighters_fizz = false;
@@ -6326,11 +7041,19 @@ repairman_barrier_override(player)
         if(!maps\mp\zombies\_zm_utility::is_player_valid(player))
             break;
 
+        rr_mult = (isDefined(player.repairman_level) && player.repairman_level > 0) ? (4 * player.repairman_level) : 1;
+        pc_mult = (isDefined(player.point_multiplier) && player.point_multiplier > 1) ? player.point_multiplier : 1;
+        zm_mult = player maps\mp\zombies\_zm_score::get_points_multiplier(player);
+        total_desired = int((cost * rr_mult) * pc_mult * zm_mult);
+
+        score_before = player.score;
         player maps\mp\zombies\_zm_blockers::handle_post_board_repair_rewards(cost, self);
-        bonus_points = cost * (pts_multiplier - 1);
-        if(bonus_points > 0)
+        score_awarded = player.score - score_before;
+
+        points_to_add = total_desired - score_awarded;
+        if(points_to_add > 0)
         {
-            player maps\mp\zombies\_zm_score::add_to_player_score(bonus_points);
+            player maps\mp\zombies\_zm_score::add_to_player_score(points_to_add);
             player.pers["score"] = player.score;
         }
 
@@ -6367,11 +7090,28 @@ repairman_tear_chunk_callback(node, chunk)
     builder = zbar.repairman_chunks[chunk];
     zbar.repairman_chunks[chunk] = undefined;
 
-    explo_origin = zbar.origin;
-    if(isDefined(self) && isAlive(self))
-        explo_origin = self.origin;
+    level thread repairman_watch_chunk_ripped(node, chunk, builder, self);
+}
 
-    playfx(loadfx("explosions/fx_default_explosion"), explo_origin);
+repairman_watch_chunk_ripped(node, chunk, builder, tearer_zombie)
+{
+    wait 0.2;
+
+    explo_origin = undefined;
+    if(isDefined(tearer_zombie) && isAlive(tearer_zombie))
+        explo_origin = tearer_zombie.origin;
+    else if(isDefined(node) && isDefined(node.zbarrier))
+        explo_origin = node.zbarrier.origin;
+    else
+        return;
+
+    if(isDefined(level._effect["exo_slam_explosion"]))
+        playfx(level._effect["exo_slam_explosion"], explo_origin);
+    else if(isDefined(level._effect["divetonuke_groundhit"]))
+        playfx(level._effect["divetonuke_groundhit"], explo_origin);
+    else
+        playfx(loadfx("explosions/fx_default_explosion"), explo_origin);
+
     playsoundatposition("zmb_phdflop_explo", explo_origin);
 
     base_damage = 1200;
@@ -6389,14 +7129,14 @@ repairman_tear_chunk_callback(node, chunk)
 
     attacker = builder;
     if(!isDefined(attacker) || !isPlayer(attacker))
-        attacker = self;
+        attacker = undefined;
 
-    if(isDefined(self) && isAlive(self))
+    if(isDefined(tearer_zombie) && isAlive(tearer_zombie))
     {
-        self dodamage(final_explo_damage, explo_origin, attacker, attacker, "none", "MOD_EXPLOSIVE");
-        if(isAlive(self) && (!is_true(self.has_legs) || is_true(self.gibbed) || self.health <= 300))
+        tearer_zombie dodamage(final_explo_damage, explo_origin, attacker, attacker, "none", "MOD_EXPLOSIVE");
+        if(isAlive(tearer_zombie) && (!is_true(tearer_zombie.has_legs) || is_true(tearer_zombie.gibbed) || tearer_zombie.health <= 300))
         {
-            self dodamage(self.health + 500, self.origin, attacker, attacker, "none", "MOD_EXPLOSIVE");
+            tearer_zombie dodamage(tearer_zombie.health + 500, tearer_zombie.origin, attacker, attacker, "none", "MOD_EXPLOSIVE");
         }
     }
 
@@ -6408,7 +7148,7 @@ repairman_tear_chunk_callback(node, chunk)
             z = zombies[i];
             if(!isDefined(z) || !isAlive(z))
                 continue;
-            if(isDefined(self) && z == self)
+            if(isDefined(tearer_zombie) && z == tearer_zombie)
                 continue;
 
             if(distanceSquared(explo_origin, z.origin) <= 32400) // 180 units radius
@@ -6811,15 +7551,17 @@ multi_perks_inactive_box_watcher()
                 box_busy = false;
                 if(isDefined(active_box))
                 {
-                    if(is_true(active_box._box_open) || is_true(active_box.weapon_out) || flag("moving_chest_now"))
+                    if(is_true(active_box._box_open) || is_true(active_box.weapon_out) || flag("moving_chest_now") || is_true(level.chest_moving))
                         box_busy = true;
                 }
+                if(flag("moving_chest_now") || is_true(level.chest_moving))
+                    box_busy = true;
                 if(isDefined(level.zombie_vars["zombie_powerup_fire_sale_on"]) && level.zombie_vars["zombie_powerup_fire_sale_on"])
                     box_busy = true;
 
                 if(box_busy)
                 {
-                    self iprintln("^1Mystery Box is currently in use!");
+                    self iprintln("^1Mystery Box is currently moving or in use!");
                     while(self useButtonPressed())
                         wait 0.05;
                 }
@@ -6884,12 +7626,14 @@ multi_perks_inactive_box_watcher()
                 }
 
                 wf_busy = false;
-                if(isDefined(active_wf) && isDefined(active_wf.machine_user))
+                if(is_true(level.wunderfizz_is_moving))
+                    wf_busy = true;
+                if(isDefined(active_wf) && (isDefined(active_wf.machine_user) || is_true(active_wf.is_moving)))
                     wf_busy = true;
 
                 if(wf_busy)
                 {
-                    self iprintln("^1Der Wunderfizz is currently in use!");
+                    self iprintln("^1Der Wunderfizz is currently moving or in use!");
                     while(self useButtonPressed())
                         wait 0.05;
                 }
@@ -6905,6 +7649,7 @@ multi_perks_inactive_box_watcher()
                     prompt_target_type = undefined;
 
                     // Deactivate current Wunderfizz
+                    level.wunderfizz_is_moving = true;
                     if(isDefined(active_wf))
                     {
                         active_wf.is_current_ball_location = 0;
@@ -7337,12 +8082,16 @@ custom_wunderfizz_relocate()
     if(!isDefined(machines) || machines.size <= 1)
         return;
 
+    level.wunderfizz_is_moving = true;
+    level endon("machine_think");
+
     do
         new_machine = machines[randomint(machines.size)];
     while(new_machine == level.random_perk_start_machine);
 
     level.random_perk_start_machine = new_machine;
     wait 10;
+    level.wunderfizz_is_moving = false;
     new_machine thread custom_wunderfizz_machine_think();
 }
 
@@ -7350,6 +8099,7 @@ custom_wunderfizz_machine_think()
 {
     level notify("machine_think");
     level endon("machine_think");
+    level.wunderfizz_is_moving = false;
 
     self show();
     self.num_time_used = 0;
